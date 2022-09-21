@@ -1,8 +1,8 @@
 import 'package:device_apps/device_apps.dart';
-import 'package:cache_manager/cache_manager.dart';
-import 'package:json_serializable/builder.dart';
+// import 'package:cache_manager/cache_manager.dart';
+// import 'package:json_serializable/builder.dart';
 import 'dart:convert';
-import 'package:json_serializable/json_serializable.dart';
+// import 'package:json_serializable/json_serializable.dart';
 
 class App {
   final String appName, packageName;

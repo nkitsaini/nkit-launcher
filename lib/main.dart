@@ -30,7 +30,7 @@ class AppListWidget extends StatefulWidget {
 class AppListState extends State<AppListWidget> {
   Widget projectWidget() {
     return FutureBuilder(
-      initialData: <Application>[],
+      initialData: <App>[],
       builder: (context, projectSnap) {
         if (projectSnap.connectionState == ConnectionState.none &&
             projectSnap.hasData == null) {
@@ -41,7 +41,7 @@ class AppListState extends State<AppListWidget> {
           return Text('data null');
         }
 
-        List<Application> apps = projectSnap.data as List<Application>;
+        List<App> apps = projectSnap.data as List<App>;
 
         bool isFiltered = widget.filterKey != '';
         apps.sort(
@@ -58,7 +58,7 @@ class AppListState extends State<AppListWidget> {
           reverse: isFiltered,
           itemCount: apps.length,
           itemBuilder: (context, index) {
-            Application app = apps[index];
+            App app = apps[index];
             return GestureDetector(
                 child: ListTile(
                   title:

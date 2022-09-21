@@ -36,7 +36,6 @@ dependencies:
   cupertino_icons: ^1.0.2
   device_apps: ^2.2.0
   cache_manager: ^1.0.0+4
-  json_serializable: ^6.3.2
 
 dev_dependencies:
   flutter_test:
