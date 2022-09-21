@@ -1,5 +1,5 @@
 import 'package:device_apps/device_apps.dart';
-// import 'package:cache_manager/cache_manager.dart';
+import 'package:cache_manager/cache_manager.dart';
 // import 'package:json_serializable/builder.dart';
 import 'dart:convert';
 // import 'package:json_serializable/json_serializable.dart';
@@ -24,15 +24,16 @@ class AppListCacher {
   String cacheKey = 'app_list_cache';
   List<App>? appList;
 
-  readCache() {
-    // ReadCache.getString(key: cacheKey).then((value) => {
-    //       if (value != null)
-    //         {
-    //           appList = (jsonDecode(value) as List<Map<String, String>>)
-    //               .map((x) => App.fromJson(x))
-    //               .toList()
-    //         }
-    //     });
+  Future readCache() async {
+    dynamic value = await ReadCache.getString(key: cacheKey);
+    if (value != null) {
+      print("Reading from cache");
+      appList = ((jsonDecode(value) as List)
+          .map((x) => App.fromJson(x))
+          .toList());
+    } else {
+      print("Cache read miss");
+    }
   }
 
   Future<List<App>> getAppList() async {
@@ -55,10 +56,12 @@ class AppListCacher {
   }
 
   Future updateCache() async {
+    print("updating cache");
     List<App> apps =
         (await _readApps()).map((x) => App.fromApplication(x)).toList();
-    // WriteCache.setString(
-    //     key: cacheKey, value: jsonEncode(apps.map((x) => x.toJson()).toList()));
+    WriteCache.setString(
+        key: cacheKey, value: jsonEncode(apps.map((x) => x.toJson()).toList()));
+    print("cache updated");
     appList = apps;
   }
 }
