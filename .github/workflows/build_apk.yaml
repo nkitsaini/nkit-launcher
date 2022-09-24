@@ -37,7 +37,7 @@ jobs:
         echo "From github ${{ env.app_tag }} "
     - run: flutter pub get
     - run: flutter test
-    - run: flutter build apk
+    - run: flutter build apk --release
     - name: Create Github Release
       uses: ncipollo/release-action@v1
       with:
