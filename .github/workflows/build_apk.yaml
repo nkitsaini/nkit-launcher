@@ -30,15 +30,19 @@ jobs:
     - uses: subosito/flutter-action@v2
       with:
         flutter-version: '3.0.5'
+    - run: |
+        tag=$(cat pubspec.yaml | grep '^version:' | sed 's/^version:\s*\(.*\)\s*$/\1/g')
+        echo "app_tag=$tag" >> $GITHUB_ENV
+        echo "Setting app tag as $tag"
     - run: flutter pub get
     - run: flutter test
     - run: flutter build apk
-
     - name: Create Github Release
       uses: ncipollo/release-action@v1
       with:
+        commit: ${{ github.sha }}
+        tag: env.app_tag
         artifacts: "build/app/outputs/flutter-apk/app-release.apk"
-        token: ${{ secrets.PERSONAL_RELEASE_TOKEN }}
 
     - name: Save APK to Artifacts
       uses: actions/upload-artifact@v2
