@@ -34,6 +34,7 @@ jobs:
         tag=$(cat pubspec.yaml | grep '^version:' | sed 's/^version:\s*\(.*\)\s*$/\1/g')
         echo "app_tag=$tag" >> $GITHUB_ENV
         echo "Setting app tag as $tag"
+        echo "From github ${{ env.app_tag }} "
     - run: flutter pub get
     - run: flutter test
     - run: flutter build apk
@@ -41,7 +42,7 @@ jobs:
       uses: ncipollo/release-action@v1
       with:
         commit: ${{ github.sha }}
-        tag: env.app_tag
+        tag: ${{ env.app_tag }}
         artifacts: "build/app/outputs/flutter-apk/app-release.apk"
 
     - name: Save APK to Artifacts
