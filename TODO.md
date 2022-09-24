@@ -4,9 +4,10 @@
 	- [ ] Can be open source contribution to https://github.com/g123k/flutter_plugin_device_apps
 
 # Checklist
-- [ ] List and Open Apps
-- [ ] Make list searchable
-- [ ] Settings page to let user specify important apps
+- [x] List and Open Apps
+	- [x] Cache app list for performance reasons
+- [x] Make list searchable
+- [ ] Settings to let user specify important apps
 - [ ] Put important apps on top of list.
 - [ ] Create two page-layout
 	- Important apps/All apps

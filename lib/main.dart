@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:device_apps/device_apps.dart';
-import 'package:cache_manager/cache_manager.dart';
+// import 'package:cache_manager/cache_manager.dart';
+import 'package:android_intent_plus/android_intent.dart';
+import 'package:android_intent_plus/flag.dart';
+import 'package:app_settings/app_settings.dart';
 import 'package:nkit_launcher/app_list.dart';
 
 AppListCacher appList = AppListCacher();
+// FocusNode messageFocus = FocusNode();
 
 void main() {
   runApp(const MyApp());
@@ -29,9 +33,11 @@ class AppListWidget extends StatefulWidget {
 
 class AppListState extends State<AppListWidget> {
   Widget projectWidget() {
+    // messageFocus.requestFocus();
     return FutureBuilder(
       initialData: <App>[],
       builder: (context, projectSnap) {
+        // messageFocus.requestFocus();
         if (projectSnap.connectionState == ConnectionState.none &&
             projectSnap.hasData == null) {
           return Text('connection none');
@@ -60,11 +66,20 @@ class AppListState extends State<AppListWidget> {
           itemBuilder: (context, index) {
             App app = apps[index];
             return GestureDetector(
-                child: ListTile(
-                  title:
-                      Text(app.appName, style: const TextStyle(fontSize: 18.0)),
-                ),
-                onTap: () => {DeviceApps.openApp(app.packageName)});
+              child: ListTile(
+                title:
+                    Text(app.appName, style: const TextStyle(fontSize: 18.0)),
+              ),
+              onTap: () => {DeviceApps.openApp(app.packageName)},
+              onLongPress: () {
+                AndroidIntent intent = AndroidIntent(
+                  action: 'action_application_details_settings',
+                  data: 'package:${app.packageName}',
+                  flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
+                );
+                intent.launch();
+              },
+            );
           },
         );
       },
@@ -87,7 +102,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Nkit Launcher',
       theme: ThemeData(
         // This is the theme of your application.
         //
@@ -100,7 +115,7 @@ class MyApp extends StatelessWidget {
         // is not restarted.
         primarySwatch: Colors.blue,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const MyHomePage(title: 'Nkit Launcher Home Page'),
     );
   }
 }
@@ -144,6 +159,9 @@ class _MyHomePageState extends State<MyHomePage> {
           onChanged: (value) => {
             setState(() => {filterSearch = value})
           },
+          autocorrect: false,
+          autofocus: true,
+          // focusNode: messageFocus,
         ),
       ],
     ));

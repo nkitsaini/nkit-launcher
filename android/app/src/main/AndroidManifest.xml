@@ -2,7 +2,7 @@
     package="com.example.nkit_launcher">
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
    <application
-        android:label="nkit_launcher"
+        android:label="Nkit Launcher"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
