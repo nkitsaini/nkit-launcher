@@ -104,17 +104,23 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Nkit Launcher',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // Try running your application with "flutter run". You'll see the
-        // application has a blue toolbar. Then, without quitting the app, try
-        // changing the primarySwatch below to Colors.green and then invoke
-        // "hot reload" (press "r" in the console where you ran "flutter run",
-        // or simply save your changes to "hot reload" in a Flutter IDE).
-        // Notice that the counter didn't reset back to zero; the application
-        // is not restarted.
-        primarySwatch: Colors.blue,
+        brightness: Brightness.light
       ),
+      darkTheme: ThemeData(
+          // backgroundColor: const Color(0xff000000)
+          brightness: Brightness.dark),
+      // theme: ThemeData(
+      //   // This is the theme of your application.
+      //   //
+      //   // Try running your application with "flutter run". You'll see the
+      //   // application has a blue toolbar. Then, without quitting the app, try
+      //   // changing the primarySwatch below to Colors.green and then invoke
+      //   // "hot reload" (press "r" in the console where you ran "flutter run",
+      //   // or simply save your changes to "hot reload" in a Flutter IDE).
+      //   // Notice that the counter didn't reset back to zero; the application
+      //   // is not restarted.
+      //   primarySwatch: Colors.blue,
+      // ),
       home: const MyHomePage(title: 'Nkit Launcher Home Page'),
     );
   }
@@ -144,26 +150,26 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
         body: Column(
-      children: [
-        Expanded(
-          child: AppListWidget(
-            filterKey: filterSearch,
-          ),
-        ),
-        TextField(
-          decoration: const InputDecoration(
-            border: UnderlineInputBorder(),
-            contentPadding: EdgeInsets.all(8.0),
-            hintText: 'Search',
-          ),
-          onChanged: (value) => {
-            setState(() => {filterSearch = value})
-          },
-          autocorrect: false,
-          autofocus: true,
-          // focusNode: messageFocus,
-        ),
-      ],
-    ));
+          children: [
+            Expanded(
+              child: AppListWidget(
+                filterKey: filterSearch,
+              ),
+            ),
+            TextField(
+              decoration: const InputDecoration(
+                border: UnderlineInputBorder(),
+                contentPadding: EdgeInsets.all(8.0),
+                hintText: 'Search',
+              ),
+              onChanged: (value) => {
+                setState(() => {filterSearch = value})
+              },
+              autocorrect: false,
+              autofocus: true,
+              // focusNode: messageFocus,
+            ),
+          ],
+        ));
   }
 }
