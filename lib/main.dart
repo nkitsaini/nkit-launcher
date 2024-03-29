@@ -2,6 +2,7 @@ import 'package:android_intent_plus/android_intent.dart';
 import 'package:android_intent_plus/flag.dart';
 import 'package:flutter/material.dart';
 import 'package:device_apps/device_apps.dart';
+import 'package:nkit_launcher/app_icon.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_iconpicker/flutter_iconpicker.dart';
 
@@ -198,17 +199,10 @@ class IconAppGridWidget extends StatelessWidget {
             context, appList.data!.grid[index].app.appName);
         switch (action) {
           case GridIconAction.selectIcon:
-            IconData? icon = await showIconPicker(context, customIconPack: {
-              'photo_camera': Icons.photo_camera,
-              'camera': Icons.camera,
-              'call': Icons.call,
-              'music': Icons.headset,
-              'credit_card': Icons.credit_card,
-              'wb_twilight': Icons.wb_twilight,
-              'podcasts': Icons.podcasts,
-            });
+            IconData? icon =
+                await showIconPicker(context, customIconPack: icons);
             if (icon != null) {
-              appList.data!.grid[index].iconCodePoint = icon.codePoint;
+              appList.data!.grid[index].iconSlug = iconDataToName(icon);
             }
             appList.flushChanges();
           case GridIconAction.remove:
@@ -237,11 +231,10 @@ class IconAppGridWidget extends StatelessWidget {
       for (final (index, app) in apps.indexed) {
         IconButton button;
         Widget icon;
-        if (app.iconCodePoint == null) {
+        if (app.iconSlug == null) {
           icon = const Icon(Icons.bolt, size: iconSize);
         } else {
-          icon = Icon(IconData(app.iconCodePoint!, fontFamily: 'MaterialIcons'),
-              size: iconSize);
+          icon = Icon(icons[app.iconSlug!], size: iconSize);
         }
         button = IconButton(
           icon: icon,

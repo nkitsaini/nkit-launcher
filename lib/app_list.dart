@@ -34,16 +34,16 @@ class CacheData {
 
 class GridApp {
   final App app;
-  int? iconCodePoint;
+  String? iconSlug;
 
-  GridApp(this.app, this.iconCodePoint);
+  GridApp(this.app, this.iconSlug);
 
   factory GridApp.fromJson(Map<String, dynamic> json) {
-    return GridApp(App.fromJson(json['app']), json['iconCodePoint']);
+    return GridApp(App.fromJson(json['app']), json['iconSlug']);
   }
 
   Map<String, dynamic> toJson() {
-    return {'app': app.toJson(), 'iconCodePoint': iconCodePoint};
+    return {'app': app.toJson(), 'iconSlug': iconSlug};
   }
 }
 
@@ -64,7 +64,7 @@ class App {
 }
 
 class AppListCacher extends ChangeNotifier {
-  String cacheKey = 'app_list_cache_v3';
+  String cacheKey = 'app_list_cache_v4';
   CacheData? data;
 
   Future readCache() async {
