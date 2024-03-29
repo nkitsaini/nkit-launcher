@@ -26,9 +26,9 @@ jobs:
     - uses: DeterminateSystems/nix-installer-action@main
     - uses: DeterminateSystems/magic-nix-cache-action@main
     - run: nix flake check
-    - run: flutter pub get
-    - run: flutter test
-    - run: flutter build apk --release
+    - run: nix develop --command flutter pub get
+    - run: nix develop --command flutter test
+    - run: nix develop --command flutter build apk --release
 
     - name: Save APK to Artifacts
       uses: actions/upload-artifact@v2
