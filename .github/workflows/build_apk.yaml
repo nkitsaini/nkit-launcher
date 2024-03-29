@@ -27,7 +27,8 @@ jobs:
     - uses: DeterminateSystems/magic-nix-cache-action@main
     - run: nix flake check
     - run: nix develop --command flutter pub get
-    - run: nix develop --command flutter test
+    # Enable when test is written
+    # - run: nix develop --command flutter test
     - run: nix develop --command flutter build apk --release
 
     - name: Save APK to Artifacts
