@@ -21,21 +21,18 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
     - uses: actions/checkout@v3
-    - uses: actions/setup-java@v2
-      with:
-        distribution: 'zulu'
-        java-version: '11'
-    - uses: subosito/flutter-action@v2
-      with:
-        flutter-version: '3.0.5'
+    - uses: DeterminateSystems/nix-installer-action@main
+    - uses: DeterminateSystems/magic-nix-cache-action@main
     - run: |
         tag=$(cat pubspec.yaml | grep '^version:' | sed 's/^version:\s*\(.*\)\s*$/\1/g')
         echo "app_tag=$tag" >> $GITHUB_ENV
         echo "Setting app tag as $tag"
         echo "From github ${{ env.app_tag }} "
-    - run: flutter pub get
-    - run: flutter test
-    - run: flutter build apk --release
+    - run: nix flake check
+    - run: nix develop --command flutter pub get
+    # Enable when test is written
+    # - run: nix develop --command flutter test
+    - run: nix develop --command flutter build apk --release
     - name: Create Github Release
       uses: ncipollo/release-action@v1
       with:
