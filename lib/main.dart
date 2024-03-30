@@ -250,6 +250,7 @@ class IconAppGridWidget extends StatelessWidget {
             }));
       }
       return GridView.count(
+        childAspectRatio: 1.5,
         crossAxisCount: 2,
         children: children,
       );
