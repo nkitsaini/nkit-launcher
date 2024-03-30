@@ -8,6 +8,13 @@ const icons = {
   'credit_card': Icons.credit_card_outlined,
   'wb_twilight': Icons.wb_twilight_outlined,
   'podcasts': Icons.podcasts_outlined,
+  'fitbit': Icons.fitbit,
+  'history_edu': Icons.history_edu_outlined,
+  'sync': Icons.sync,
+  'sync_alt': Icons.sync_alt,
+  'map': Icons.map_outlined,
+  'place': Icons.place_outlined,
+  'web': Icons.web_outlined,
 };
 
 String? iconDataToName(IconData icon) {
