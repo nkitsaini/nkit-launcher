@@ -7,14 +7,20 @@ import 'package:flutter/material.dart';
 // import 'package:json_serializable/json_serializable.dart';
 
 class CacheData {
-  final List<GridApp> grid;
-  List<App> apps;
+  List<GridApp> grid;
+  Map<String, App> apps;
 
   CacheData(this.grid, this.apps);
 
-  factory CacheData.fromJson(Map<String, dynamic> json) => CacheData(
-      (json['grid'] as List).map((x) => gridAppFromJson(x)).toList(),
-      (json['apps'] as List).map((x) => App.fromJson(x)).toList());
+  factory CacheData.fromJson(Map<String, dynamic> json) {
+    var apps = (json['apps'] as Map<String, dynamic>)
+        .map((x, y) => MapEntry(x, App.fromJson(y)));
+
+    List<GridApp> grid =
+        (json['grid'] as List).map((x) => gridAppFromJson(x)).toList();
+
+    return CacheData(grid, apps);
+  }
 
   static gridAppToJson(GridApp gridApp) {
     return gridApp.toJson();
@@ -27,23 +33,23 @@ class CacheData {
   Map<String, dynamic> toJson() {
     return {
       'grid': grid.map((x) => gridAppToJson(x)).toList(),
-      'apps': apps.map((x) => x.toJson()).toList()
+      'apps': apps.map((x, y) => MapEntry(x, y.toJson()))
     };
   }
 }
 
 class GridApp {
-  final App app;
+  final String packageName;
   String? iconSlug;
 
-  GridApp(this.app, this.iconSlug);
+  GridApp(this.packageName, this.iconSlug);
 
   factory GridApp.fromJson(Map<String, dynamic> json) {
-    return GridApp(App.fromJson(json['app']), json['iconSlug']);
+    return GridApp(json['packageName'], json['iconSlug']);
   }
 
   Map<String, dynamic> toJson() {
-    return {'app': app.toJson(), 'iconSlug': iconSlug};
+    return {'packageName': packageName, 'iconSlug': iconSlug};
   }
 }
 
@@ -78,7 +84,7 @@ class AppListCacher extends ChangeNotifier {
     }
   }
 
-  Future<List<App>> getAppList() async {
+  Future<Map<String, App>> getAppList() async {
     if (data == null) {
       await readCache();
     }
@@ -107,12 +113,23 @@ class AppListCacher extends ChangeNotifier {
     notifyListeners();
   }
 
+  setGridCache(List<GridApp> apps) async {
+    if (data == null) {
+      await updateCache();
+    }
+    data!.grid = apps;
+    flushChanges();
+  }
+
   Future updateCache() async {
-    print("updating cache");
-    List<App> apps = (await _readApps())
+    List<App> appList = (await _readApps())
         .where((x) => x.enabled)
         .map((x) => App.fromApplication(x))
         .toList();
+    Map<String, App> apps = {};
+    for (final app in appList) {
+      apps[app.packageName] = app;
+    }
     if (data == null) {
       data = CacheData([], apps);
     } else {

@@ -40,6 +40,7 @@ dependencies:
   android_intent_plus: ^5.0.1
   provider: ^6.1.2
   flutter_iconpicker: ^3.4.4
+  flutter_file_dialog: ^3.0.2
 
 dev_dependencies:
   flutter_test:

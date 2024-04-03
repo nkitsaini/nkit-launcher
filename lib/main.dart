@@ -1,7 +1,11 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:android_intent_plus/flag.dart';
 import 'package:flutter/material.dart';
 import 'package:device_apps/device_apps.dart';
+import 'package:flutter_file_dialog/flutter_file_dialog.dart';
 import 'package:nkit_launcher/app_icon.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_iconpicker/flutter_iconpicker.dart';
@@ -143,6 +147,28 @@ class _MyHomePageState extends State<MyHomePage> {
               switch (action) {
                 case GlobalAction.refreshApps:
                   await appList.updateCache();
+                case GlobalAction.exportGridJson:
+                  if (appList.data == null) {
+                    return;
+                  }
+                  var grid = appList.data!.grid.map((x) => x.toJson()).toList();
+                  final body = json.encode(grid);
+                  final params = SaveFileDialogParams(
+                      data: const Utf8Encoder().convert(body),
+                      fileName: "nkit_launcher_grid.json");
+                  await FlutterFileDialog.saveFile(params: params);
+                case GlobalAction.importGridJson:
+                  var file = await FlutterFileDialog.pickFile(
+                      params: const OpenFileDialogParams());
+                  if (file != null) {
+                    var fileContent = File(file).readAsStringSync();
+                    var content = json.decode(fileContent);
+
+                    appList.setGridCache((content as List)
+                        .map((x) => GridApp.fromJson(x))
+                        .toList());
+                  }
+                  await appList.updateCache();
                 case null:
               }
             },
@@ -195,8 +221,10 @@ class IconAppGridWidget extends StatelessWidget {
       }
 
       longPressActionHandler(int index) async {
-        GridIconAction? action = await askGridIconAction(
-            context, appList.data!.grid[index].app.appName);
+        var item = appList.data!.grid[index];
+        var app = appList.data!.apps[item.packageName];
+        GridIconAction? action =
+            await askGridIconAction(context, app?.appName ?? "Unknown");
         switch (action) {
           case GridIconAction.selectIcon:
             IconData? icon =
@@ -239,7 +267,7 @@ class IconAppGridWidget extends StatelessWidget {
         button = IconButton(
           icon: icon,
           onPressed: () {
-            DeviceApps.openApp(app.app.packageName);
+            DeviceApps.openApp(app.packageName);
           },
         );
 
@@ -352,7 +380,7 @@ Future<GridIconAction?> askGridIconAction(
       });
 }
 
-enum GlobalAction { refreshApps }
+enum GlobalAction { refreshApps, exportGridJson, importGridJson }
 
 Future<GlobalAction?> askGlobalAction(BuildContext context) async {
   return await showDialog<GlobalAction>(
@@ -362,6 +390,14 @@ Future<GlobalAction?> askGlobalAction(BuildContext context) async {
           SimpleDialogOption(
               onPressed: () => Navigator.pop(context, GlobalAction.refreshApps),
               child: const Text('Refresh Apps')),
+          SimpleDialogOption(
+              onPressed: () =>
+                  Navigator.pop(context, GlobalAction.exportGridJson),
+              child: const Text('Export Grid Action')),
+          SimpleDialogOption(
+              onPressed: () =>
+                  Navigator.pop(context, GlobalAction.importGridJson),
+              child: const Text('Import Grid Action')),
         ];
         return SimpleDialog(children: children);
       });
@@ -399,7 +435,7 @@ class AppListState extends State<AppListWidget> {
           );
         }
 
-        List<App> apps = appList.data!.apps.toList();
+        List<App> apps = appList.data!.apps.values.toList();
         if (widget.filterKey == null) {
           return const Row();
         }
@@ -439,7 +475,7 @@ class AppListState extends State<AppListWidget> {
                     );
                     intent.launch();
                   case AppAction.addToGrid:
-                    appList.data!.grid.add(GridApp(app, null));
+                    appList.data!.grid.add(GridApp(app.packageName, null));
                     await appList.flushChanges();
                   case null:
                 }
