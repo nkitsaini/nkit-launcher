@@ -1,10 +1,8 @@
 import 'package:device_apps/device_apps.dart';
 import 'package:cache_manager/cache_manager.dart';
-// import 'package:json_serializable/builder.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-// import 'package:json_serializable/json_serializable.dart';
 
 class CacheData {
   List<GridApp> grid;

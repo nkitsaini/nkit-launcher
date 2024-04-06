@@ -12,8 +12,6 @@ import 'package:flutter_iconpicker/flutter_iconpicker.dart';
 
 import 'app_list.dart';
 
-// AppListCacher appList = AppListCacher();
-
 void main() {
   runApp(const MyApp());
 }
@@ -285,69 +283,6 @@ class IconAppGridWidget extends StatelessWidget {
     });
   }
 }
-// class AppListState extends State<AppListWidget> {
-//   Widget projectWidget() {
-//     // messageFocus.requestFocus();
-//     return FutureBuilder(
-//       initialData: const <App>[],
-//       builder: (context, projectSnap) {
-//         // messageFocus.requestFocus();
-//         if (projectSnap.connectionState == ConnectionState.none &&
-//             projectSnap.hasData == false) {
-//           return const Text('connection none');
-//         }
-
-//         if (projectSnap.data == null) {
-//           return const Text('data null');
-//         }
-
-//         List<App> apps = projectSnap.data as List<App>;
-
-//         bool isFiltered = widget.filterKey != '';
-//         apps.sort(
-//           (a, b) => a.appName.toLowerCase().compareTo(b.appName.toLowerCase()),
-//         );
-//         if (isFiltered) {
-//           apps = apps.reversed.toList();
-//         }
-//         apps.removeWhere((app) => !app.appName
-//             .toLowerCase()
-//             .contains(widget.filterKey.toLowerCase()));
-//         print('App length: ${apps.length}');
-//         return ListView.builder(
-//           reverse: isFiltered,
-//           itemCount: apps.length,
-//           itemBuilder: (context, index) {
-//             App app = apps[index];
-//             return GestureDetector(
-//               child: ListTile(
-//                 title:
-//                     Text(app.appName, style: const TextStyle(fontSize: 18.0)),
-//               ),
-//               onTap: () => {DeviceApps.openApp(app.packageName)},
-//               onLongPress: () {
-//                 AndroidIntent intent = AndroidIntent(
-//                   action: 'action_application_details_settings',
-//                   data: 'package:${app.packageName}',
-//                   flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
-//                 );
-//                 intent.launch();
-//               },
-//             );
-//           },
-//         );
-//       },
-//       future: appList.getAppList(),
-//     );
-//   }
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Scaffold(
-//       body: projectWidget(),
-//     );
-//   }
-// }
 
 enum GridIconAction { selectIcon, moveToLeft, moveToRight, remove }
 
@@ -485,58 +420,6 @@ class AppListState extends State<AppListWidget> {
         );
       },
     );
-    // messageFocus.requestFocus();
-    // return FutureBuilder(
-    //   initialData: const <App>[],
-    //   builder: (context, projectSnap) {
-    //     // messageFocus.requestFocus();
-    //     if (projectSnap.connectionState == ConnectionState.none &&
-    //         projectSnap.hasData == false) {
-    //       return const Text('connection none');
-    //     }
-
-    //     if (projectSnap.data == null) {
-    //       return const Text('data null');
-    //     }
-
-    //     List<App> apps = projectSnap.data as List<App>;
-
-    //     bool isFiltered = widget.filterKey != '';
-    //     apps.sort(
-    //       (a, b) => a.appName.toLowerCase().compareTo(b.appName.toLowerCase()),
-    //     );
-    //     if (isFiltered) {
-    //       apps = apps.reversed.toList();
-    //     }
-    //     apps.removeWhere((app) => !app.appName
-    //         .toLowerCase()
-    //         .contains(widget.filterKey.toLowerCase()));
-    //     print('App length: ${apps.length}');
-    //     return ListView.builder(
-    //       reverse: isFiltered,
-    //       itemCount: apps.length,
-    //       itemBuilder: (context, index) {
-    //         App app = apps[index];
-    //         return GestureDetector(
-    //           child: ListTile(
-    //             title:
-    //                 Text(app.appName, style: const TextStyle(fontSize: 18.0)),
-    //           ),
-    //           onTap: () => {DeviceApps.openApp(app.packageName)},
-    //           onLongPress: () {
-    //             AndroidIntent intent = AndroidIntent(
-    //               action: 'action_application_details_settings',
-    //               data: 'package:${app.packageName}',
-    //               flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
-    //             );
-    //             intent.launch();
-    //           },
-    //         );
-    //       },
-    //     );
-    //   },
-    //   future: appList.getAppList(),
-    // );
   }
 
   @override
