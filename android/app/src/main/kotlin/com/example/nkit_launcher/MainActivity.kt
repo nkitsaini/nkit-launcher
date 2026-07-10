@@ -318,8 +318,8 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
-     * Stores a lossless PNG of the centred BoxFit.cover crop at display size.
-     * This avoids repeatedly decoding pixels that Flutter would crop away.
+     * Stores a moderately sized, uncropped PNG for Flutter's wallpaper editor.
+     * Keeping the full composition is necessary for user-selected crop framing.
      */
     private fun prepareWallpaper(uri: Uri): File {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -331,10 +331,17 @@ class MainActivity : FlutterActivity() {
         }
 
         val display = resources.displayMetrics
-        val scale = maxOf(
+        val coverScale = maxOf(
             display.widthPixels.toFloat() / bounds.outWidth,
             display.heightPixels.toFloat() / bounds.outHeight
-        ).coerceAtMost(1f)
+        )
+        // Retain enough detail for a modest zoom, while bounding very large
+        // panoramas so selecting a wallpaper cannot exhaust memory.
+        val scale = minOf(
+            coverScale * 2,
+            1f,
+            4096f / maxOf(bounds.outWidth, bounds.outHeight)
+        )
         val targetWidth = (bounds.outWidth * scale).toInt().coerceAtLeast(1)
         val targetHeight = (bounds.outHeight * scale).toInt().coerceAtLeast(1)
         var sampleSize = 1
@@ -353,48 +360,22 @@ class MainActivity : FlutterActivity() {
         } ?: return copyPickedFile(uri)
         val displayWidth = display.widthPixels.coerceAtLeast(1)
         val displayHeight = display.heightPixels.coerceAtLeast(1)
-        val displayAspect = displayWidth.toFloat() / displayHeight
-        val decodedAspect = decoded.width.toFloat() / decoded.height
-        val cropWidth: Int
-        val cropHeight: Int
-        val cropLeft: Int
-        val cropTop: Int
-        if (decodedAspect > displayAspect) {
-            cropHeight = decoded.height
-            cropWidth = (cropHeight * displayAspect).toInt().coerceAtLeast(1)
-            cropLeft = (decoded.width - cropWidth) / 2
-            cropTop = 0
-        } else {
-            cropWidth = decoded.width
-            cropHeight = (cropWidth / displayAspect).toInt().coerceAtLeast(1)
-            cropLeft = 0
-            cropTop = (decoded.height - cropHeight) / 2
-        }
-        val cropped = if (
-            cropWidth == decoded.width && cropHeight == decoded.height
+        val outputScale = minOf(
+            targetWidth.toFloat() / decoded.width,
+            targetHeight.toFloat() / decoded.height,
+            1f
+        )
+        val outputWidth = (decoded.width * outputScale).toInt().coerceAtLeast(1)
+        val outputHeight = (decoded.height * outputScale).toInt().coerceAtLeast(1)
+        val resized = if (
+            decoded.width == outputWidth && decoded.height == outputHeight
         ) {
             decoded
         } else {
-            Bitmap.createBitmap(decoded, cropLeft, cropTop, cropWidth, cropHeight)
+            Bitmap.createScaledBitmap(decoded, outputWidth, outputHeight, true)
         }
-        if (cropped !== decoded) {
+        if (resized !== decoded) {
             decoded.recycle()
-        }
-        val outputScale = minOf(
-            displayWidth.toFloat() / cropped.width,
-            displayHeight.toFloat() / cropped.height
-        ).coerceAtMost(1f)
-        val outputWidth = (cropped.width * outputScale).toInt().coerceAtLeast(1)
-        val outputHeight = (cropped.height * outputScale).toInt().coerceAtLeast(1)
-        val resized = if (
-            cropped.width == outputWidth && cropped.height == outputHeight
-        ) {
-            cropped
-        } else {
-            Bitmap.createScaledBitmap(cropped, outputWidth, outputHeight, true)
-        }
-        if (resized !== cropped) {
-            cropped.recycle()
         }
         val wallpaperDirectory = File(filesDir, "wallpapers").apply { mkdirs() }
         val wallpaper = File(wallpaperDirectory, "wallpaper_${System.currentTimeMillis()}.png")

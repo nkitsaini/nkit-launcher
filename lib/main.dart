@@ -77,7 +77,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
     return Consumer<AppListCacher>(
       builder: (context, appList, child) {
-        final wallpaperPath = appList.settings.wallpaperFor(brightness);
+        final wallpaper = appList.settings.wallpaperFor(brightness);
         final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
         final children = <Widget>[];
         if (filterSearch == null) {
@@ -85,7 +85,7 @@ class _MyHomePageState extends State<MyHomePage> {
         } else {
           children.add(
             Expanded(
-              child: wallpaperPath == null
+              child: wallpaper == null
                   ? AppListWidget(
                       filterKey: filterSearch ?? '',
                       onAppOpen: _clearSearch,
@@ -132,7 +132,7 @@ class _MyHomePageState extends State<MyHomePage> {
             padding: EdgeInsets.only(bottom: keyboardInset),
             child: SafeArea(
               top: false,
-              child: wallpaperPath == null
+              child: wallpaper == null
                   ? searchRow
                   : _FrostedSurface(
                       settings: appList.settings,
@@ -142,28 +142,29 @@ class _MyHomePageState extends State<MyHomePage> {
           ),
         );
 
-        return Scaffold(
-          resizeToAvoidBottomInset: false,
-          body: Stack(
-            fit: StackFit.expand,
-            children: [
-              ColoredBox(color: Theme.of(context).colorScheme.surface),
-              if (wallpaperPath != null)
-                RepaintBoundary(
-                  child: Image.file(
-                    File(wallpaperPath),
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) =>
-                        const SizedBox.shrink(),
+        return PopScope(
+          canPop: filterSearch == null,
+          onPopInvokedWithResult: (didPop, result) {
+            if (!didPop && filterSearch != null) {
+              _clearSearch();
+            }
+          },
+          child: Scaffold(
+            resizeToAvoidBottomInset: false,
+            body: Stack(
+              fit: StackFit.expand,
+              children: [
+                ColoredBox(color: Theme.of(context).colorScheme.surface),
+                if (wallpaper != null)
+                  RepaintBoundary(child: _WallpaperImage(wallpaper: wallpaper)),
+                if (wallpaper != null)
+                  ColoredBox(
+                    color: Theme.of(context).colorScheme.surface.withValues(
+                        alpha: brightness == Brightness.dark ? 0.32 : 0.18),
                   ),
-                ),
-              if (wallpaperPath != null)
-                ColoredBox(
-                  color: Theme.of(context).colorScheme.surface.withValues(
-                      alpha: brightness == Brightness.dark ? 0.32 : 0.18),
-                ),
-              BackdropGroup(child: Column(children: children)),
-            ],
+                BackdropGroup(child: Column(children: children)),
+              ],
+            ),
           ),
         );
       },
@@ -279,6 +280,68 @@ class _FrostedSurface extends StatelessWidget {
           child: child,
         ),
       ),
+    );
+  }
+}
+
+/// Renders the crop and optional frost effect that the user chose for a
+/// wallpaper. The effect is applied to the wallpaper image itself, separately
+/// from the frosted search and icon surfaces drawn above it.
+class _WallpaperImage extends StatelessWidget {
+  const _WallpaperImage({required this.wallpaper});
+
+  final WallpaperAppearance wallpaper;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final scale = wallpaper.cropScale;
+        final offset = Offset(
+          -wallpaper.cropX * constraints.maxWidth * (scale - 1) / 2,
+          -wallpaper.cropY * constraints.maxHeight * (scale - 1) / 2,
+        );
+        Widget image = Transform.translate(
+          offset: offset,
+          child: Transform.scale(
+            scale: scale,
+            child: SizedBox.expand(
+              child: Image.file(
+                File(wallpaper.path),
+                fit: BoxFit.cover,
+                alignment: Alignment(wallpaper.cropX, wallpaper.cropY),
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              ),
+            ),
+          ),
+        );
+        if (wallpaper.frosted && wallpaper.frostBlur > 0) {
+          image = ImageFiltered(
+            imageFilter: ImageFilter.blur(
+              sigmaX: wallpaper.frostBlur,
+              sigmaY: wallpaper.frostBlur,
+            ),
+            child: image,
+          );
+        }
+        return ClipRect(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              image,
+              if (wallpaper.frosted && wallpaper.frostOpacity > 0)
+                ColoredBox(
+                  color: Color.lerp(
+                    Colors.black,
+                    Colors.white,
+                    wallpaper.frostTint,
+                  )!
+                      .withValues(alpha: wallpaper.frostOpacity),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -996,17 +1059,17 @@ Future<void> _showWallpaperDialog(BuildContext context) async {
 
   switch (action) {
     case WallpaperAction.pickLight:
-      final path = await _pickWallpaperWithFeedback(context);
-      if (path != null) {
+      final wallpaper = await _pickAndEditWallpaper(context);
+      if (wallpaper != null) {
         await appList.updateSettings(
-          appList.settings.copyWith(lightWallpaperPath: path),
+          appList.settings.copyWith(lightWallpaper: wallpaper),
         );
       }
     case WallpaperAction.pickDark:
-      final path = await _pickWallpaperWithFeedback(context);
-      if (path != null) {
+      final wallpaper = await _pickAndEditWallpaper(context);
+      if (wallpaper != null) {
         await appList.updateSettings(
-          appList.settings.copyWith(darkWallpaperPath: path),
+          appList.settings.copyWith(darkWallpaper: wallpaper),
         );
       }
     case WallpaperAction.clearLight:
@@ -1028,9 +1091,7 @@ Future<void> _showWallpaperDialog(BuildContext context) async {
   }
 }
 
-/// The Android picker returns only after it has resized and stored the image.
-/// Keep feedback visible for that otherwise silent part of the flow.
-Future<String?> _pickWallpaperWithFeedback(BuildContext context) async {
+Future<WallpaperAppearance?> _pickAndEditWallpaper(BuildContext context) async {
   showDialog<void>(
     context: context,
     useRootNavigator: true,
@@ -1046,7 +1107,7 @@ Future<String?> _pickWallpaperWithFeedback(BuildContext context) async {
               child: CircularProgressIndicator(strokeWidth: 3),
             ),
             SizedBox(width: 20),
-            Expanded(child: Text('Preparing wallpaper…')),
+            Expanded(child: Text('Loading wallpaper…')),
           ],
         ),
       ),
@@ -1054,12 +1115,224 @@ Future<String?> _pickWallpaperWithFeedback(BuildContext context) async {
   );
   // Ensure the overlay has been painted before the system picker takes over.
   await WidgetsBinding.instance.endOfFrame;
+  String? path;
   try {
-    return await LauncherBridge.pickFile(mimeType: 'image/*');
+    path = await LauncherBridge.pickFile(mimeType: 'image/*');
   } finally {
     if (context.mounted) {
       Navigator.of(context, rootNavigator: true).pop();
     }
+  }
+  if (!context.mounted || path == null) {
+    return null;
+  }
+  return showModalBottomSheet<WallpaperAppearance>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (_) => _WallpaperEditor(path: path!),
+  );
+}
+
+class _WallpaperEditor extends StatefulWidget {
+  const _WallpaperEditor({required this.path});
+
+  final String path;
+
+  @override
+  State<_WallpaperEditor> createState() => _WallpaperEditorState();
+}
+
+class _WallpaperEditorState extends State<_WallpaperEditor> {
+  double _cropScale = 1;
+  double _cropX = 0;
+  double _cropY = 0;
+  bool _frosted = false;
+  double _frostBlur = 12;
+  double _frostOpacity = 0.32;
+  double _frostTint = 0.92;
+
+  WallpaperAppearance get _wallpaper => WallpaperAppearance(
+        path: widget.path,
+        cropScale: _cropScale,
+        cropX: _cropX,
+        cropY: _cropY,
+        frosted: _frosted,
+        frostBlur: _frostBlur,
+        frostOpacity: _frostOpacity,
+        frostTint: _frostTint,
+      );
+
+  void _moveCrop(DragUpdateDetails details, BoxConstraints constraints) {
+    setState(() {
+      _cropX = (_cropX - details.delta.dx / (constraints.maxWidth / 2))
+          .clamp(-1.0, 1.0);
+      _cropY = (_cropY - details.delta.dy / (constraints.maxHeight / 2))
+          .clamp(-1.0, 1.0);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final previewHeight = MediaQuery.sizeOf(context).height * 0.34;
+    return Material(
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 12, 4),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  tooltip: 'Cancel',
+                  onPressed: () => Navigator.pop(context),
+                ),
+                const Expanded(
+                  child: Text(
+                    'Edit wallpaper',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                TextButton.icon(
+                  icon: const Icon(Icons.check),
+                  label: const Text('Use wallpaper'),
+                  onPressed: () => Navigator.pop(context, _wallpaper),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: previewHeight,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: LayoutBuilder(
+                builder: (context, constraints) => GestureDetector(
+                  onPanUpdate: (details) => _moveCrop(details, constraints),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(15),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          _WallpaperImage(wallpaper: _wallpaper),
+                          Align(
+                            alignment: Alignment.bottomCenter,
+                            child: Container(
+                              margin: const EdgeInsets.all(12),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.55),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: const Text(
+                                'Drag to position the crop',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+              children: [
+                Text('Crop zoom: ${_cropScale.toStringAsFixed(1)}×'),
+                Slider(
+                  value: _cropScale,
+                  min: 1,
+                  max: 3,
+                  divisions: 20,
+                  label: '${_cropScale.toStringAsFixed(1)}×',
+                  onChanged: (value) => setState(() => _cropScale = value),
+                ),
+                Row(
+                  children: [
+                    const Expanded(child: Text('Crop position')),
+                    TextButton.icon(
+                      icon: const Icon(Icons.center_focus_strong, size: 18),
+                      label: const Text('Center'),
+                      onPressed: () => setState(() {
+                        _cropX = 0;
+                        _cropY = 0;
+                      }),
+                    ),
+                  ],
+                ),
+                Text('Horizontal: ${(_cropX * 100).round()}%'),
+                Slider(
+                  value: _cropX,
+                  min: -1,
+                  max: 1,
+                  divisions: 20,
+                  onChanged: (value) => setState(() => _cropX = value),
+                ),
+                Text('Vertical: ${(_cropY * 100).round()}%'),
+                Slider(
+                  value: _cropY,
+                  min: -1,
+                  max: 1,
+                  divisions: 20,
+                  onChanged: (value) => setState(() => _cropY = value),
+                ),
+                const Divider(height: 32),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.blur_on),
+                  title: const Text('Frost the wallpaper'),
+                  subtitle: const Text('Blur and tint the image before use'),
+                  value: _frosted,
+                  onChanged: (value) => setState(() => _frosted = value),
+                ),
+                if (_frosted) ...[
+                  Text('Blur: ${_frostBlur.round()} px'),
+                  Slider(
+                    value: _frostBlur,
+                    min: 0,
+                    max: 30,
+                    divisions: 30,
+                    label: '${_frostBlur.round()} px',
+                    onChanged: (value) => setState(() => _frostBlur = value),
+                  ),
+                  Text('Tint opacity: ${(_frostOpacity * 100).round()}%'),
+                  Slider(
+                    value: _frostOpacity,
+                    min: 0,
+                    max: 0.8,
+                    divisions: 16,
+                    label: '${(_frostOpacity * 100).round()}%',
+                    onChanged: (value) => setState(() => _frostOpacity = value),
+                  ),
+                  Text('Tint: ${(_frostTint * 100).round()}% light'),
+                  Slider(
+                    value: _frostTint,
+                    min: 0,
+                    max: 1,
+                    divisions: 20,
+                    label: '${(_frostTint * 100).round()}% light',
+                    onChanged: (value) => setState(() => _frostTint = value),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

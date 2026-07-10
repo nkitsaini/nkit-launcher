@@ -153,10 +153,78 @@ class LauncherEntry {
   }
 }
 
+class WallpaperAppearance {
+  final String path;
+  final double cropScale;
+  final double cropX;
+  final double cropY;
+  final bool frosted;
+  final double frostBlur;
+  final double frostOpacity;
+  final double frostTint;
+
+  const WallpaperAppearance({
+    required this.path,
+    this.cropScale = 1,
+    this.cropX = 0,
+    this.cropY = 0,
+    this.frosted = false,
+    this.frostBlur = 12,
+    this.frostOpacity = 0.32,
+    this.frostTint = 0.92,
+  });
+
+  factory WallpaperAppearance.fromJson(Map<String, dynamic> json) {
+    return WallpaperAppearance(
+      path: json['path'] as String,
+      cropScale: LauncherSettings._boundedSetting(
+        json['cropScale'],
+        1,
+        1,
+        3,
+      ),
+      cropX: LauncherSettings._boundedSetting(json['cropX'], 0, -1, 1),
+      cropY: LauncherSettings._boundedSetting(json['cropY'], 0, -1, 1),
+      frosted: json['frosted'] as bool? ?? false,
+      frostBlur: LauncherSettings._boundedSetting(
+        json['frostBlur'],
+        12,
+        0,
+        30,
+      ),
+      frostOpacity: LauncherSettings._boundedSetting(
+        json['frostOpacity'],
+        0.32,
+        0,
+        0.8,
+      ),
+      frostTint: LauncherSettings._boundedSetting(
+        json['frostTint'],
+        0.92,
+        0,
+        1,
+      ),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'path': path,
+      'cropScale': cropScale,
+      'cropX': cropX,
+      'cropY': cropY,
+      'frosted': frosted,
+      'frostBlur': frostBlur,
+      'frostOpacity': frostOpacity,
+      'frostTint': frostTint,
+    };
+  }
+}
+
 class LauncherSettings {
   final ThemeMode themeMode;
-  final String? lightWallpaperPath;
-  final String? darkWallpaperPath;
+  final WallpaperAppearance? lightWallpaper;
+  final WallpaperAppearance? darkWallpaper;
   final int homeColumns;
   final bool frostedIconBackgrounds;
   final double frostBlur;
@@ -166,8 +234,8 @@ class LauncherSettings {
 
   const LauncherSettings({
     this.themeMode = ThemeMode.system,
-    this.lightWallpaperPath,
-    this.darkWallpaperPath,
+    this.lightWallpaper,
+    this.darkWallpaper,
     this.homeColumns = 2,
     this.frostedIconBackgrounds = false,
     this.frostBlur = 12,
@@ -182,8 +250,14 @@ class LauncherSettings {
         (mode) => mode.name == json['themeMode'],
         orElse: () => ThemeMode.system,
       ),
-      lightWallpaperPath: json['lightWallpaperPath'] as String?,
-      darkWallpaperPath: json['darkWallpaperPath'] as String?,
+      lightWallpaper: _wallpaperFromJson(
+        json['lightWallpaper'],
+        json['lightWallpaperPath'] as String?,
+      ),
+      darkWallpaper: _wallpaperFromJson(
+        json['darkWallpaper'],
+        json['darkWallpaperPath'] as String?,
+      ),
       homeColumns: _boundedIntSetting(json['homeColumns'], 2, 1, 5),
       frostedIconBackgrounds: json['frostedIconBackgrounds'] as bool? ?? false,
       // iconFrost* was the original, icon-only setting. Keep reading it so
@@ -217,6 +291,22 @@ class LauncherSettings {
     return number.clamp(minimum, maximum);
   }
 
+  static WallpaperAppearance? _wallpaperFromJson(
+    dynamic value,
+    String? legacyPath,
+  ) {
+    if (value is Map) {
+      final json = Map<String, dynamic>.from(value);
+      if (json['path'] is String) {
+        return WallpaperAppearance.fromJson(json);
+      }
+    }
+    return legacyPath == null ? null : WallpaperAppearance(path: legacyPath);
+  }
+
+  String? get lightWallpaperPath => lightWallpaper?.path;
+  String? get darkWallpaperPath => darkWallpaper?.path;
+
   static int _boundedIntSetting(
     dynamic value,
     int fallback,
@@ -229,8 +319,8 @@ class LauncherSettings {
 
   LauncherSettings copyWith({
     ThemeMode? themeMode,
-    String? lightWallpaperPath,
-    String? darkWallpaperPath,
+    WallpaperAppearance? lightWallpaper,
+    WallpaperAppearance? darkWallpaper,
     bool clearLightWallpaper = false,
     bool clearDarkWallpaper = false,
     int? homeColumns,
@@ -242,12 +332,10 @@ class LauncherSettings {
   }) {
     return LauncherSettings(
       themeMode: themeMode ?? this.themeMode,
-      lightWallpaperPath: clearLightWallpaper
-          ? null
-          : lightWallpaperPath ?? this.lightWallpaperPath,
-      darkWallpaperPath: clearDarkWallpaper
-          ? null
-          : darkWallpaperPath ?? this.darkWallpaperPath,
+      lightWallpaper:
+          clearLightWallpaper ? null : lightWallpaper ?? this.lightWallpaper,
+      darkWallpaper:
+          clearDarkWallpaper ? null : darkWallpaper ?? this.darkWallpaper,
       homeColumns: homeColumns ?? this.homeColumns,
       frostedIconBackgrounds:
           frostedIconBackgrounds ?? this.frostedIconBackgrounds,
@@ -259,18 +347,22 @@ class LauncherSettings {
     );
   }
 
-  String? wallpaperFor(Brightness brightness) {
+  WallpaperAppearance? wallpaperFor(Brightness brightness) {
     if (brightness == Brightness.dark) {
-      return darkWallpaperPath ?? lightWallpaperPath;
+      return darkWallpaper ?? lightWallpaper;
     }
-    return lightWallpaperPath ?? darkWallpaperPath;
+    return lightWallpaper ?? darkWallpaper;
   }
 
   Map<String, dynamic> toJson() {
     return {
       'themeMode': themeMode.name,
+      // Keep paths for installs on an older app version, while the complete
+      // appearance data is used by the current version.
       'lightWallpaperPath': lightWallpaperPath,
       'darkWallpaperPath': darkWallpaperPath,
+      'lightWallpaper': lightWallpaper?.toJson(),
+      'darkWallpaper': darkWallpaper?.toJson(),
       'homeColumns': homeColumns,
       'frostedIconBackgrounds': frostedIconBackgrounds,
       'frostBlur': frostBlur,
