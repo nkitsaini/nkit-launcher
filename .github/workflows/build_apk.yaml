@@ -22,7 +22,7 @@ jobs:
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: DeterminateSystems/nix-installer-action@main
     - uses: DeterminateSystems/magic-nix-cache-action@main
     - run: nix flake check
@@ -31,8 +31,17 @@ jobs:
     # - run: nix develop --command flutter test
     - run: nix develop --command flutter build apk --release
 
+    - id: artifact
+      name: Name APK artifact
+      run: |
+        version=$(sed -n 's/^version: *//p' pubspec.yaml)
+        file_name="nkit-launcher-${version}.apk"
+        mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/${file_name}"
+        echo "file_name=${file_name}" >> "$GITHUB_OUTPUT"
+        echo "path=build/app/outputs/flutter-apk/${file_name}" >> "$GITHUB_OUTPUT"
+
     - name: Save APK to Artifacts
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
-        name: APK
-        path: build/app/outputs/flutter-apk/app-release.apk
+        name: ${{ steps.artifact.outputs.file_name }}
+        path: ${{ steps.artifact.outputs.path }}

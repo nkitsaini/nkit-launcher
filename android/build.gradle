@@ -16,3 +16,21 @@ subprojects {
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }
+
+subprojects {
+    if (project.name != 'app') {
+        afterEvaluate { prj ->
+            if (prj.hasProperty('android')) {
+                prj.android {
+                    if (namespace == null) {
+                        namespace prj.group.toString()
+                    }
+                    compileSdk 34
+                    defaultConfig {
+                        targetSdk 34
+                    }
+                }
+            }
+        }
+    }
+}

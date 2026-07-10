@@ -1,138 +1,491 @@
-import 'package:device_apps/device_apps.dart';
-import 'package:cache_manager/cache_manager.dart';
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'launcher_bridge.dart';
+
+enum LauncherEntryType { activity, shortcut }
 
 class CacheData {
   List<GridApp> grid;
-  Map<String, App> apps;
+  Map<String, LauncherEntry> entries;
 
-  CacheData(this.grid, this.apps);
+  CacheData(this.grid, this.entries);
 
   factory CacheData.fromJson(Map<String, dynamic> json) {
-    var apps = (json['apps'] as Map<String, dynamic>)
-        .map((x, y) => MapEntry(x, App.fromJson(y)));
+    final rawEntries = json['entries'] ?? json['apps'] ?? <String, dynamic>{};
+    final entries = (rawEntries as Map<String, dynamic>).map(
+      (key, value) => MapEntry(
+        key,
+        LauncherEntry.fromJson(Map<String, dynamic>.from(value as Map)),
+      ),
+    );
 
-    List<GridApp> grid =
-        (json['grid'] as List).map((x) => gridAppFromJson(x)).toList();
+    final grid = (json['grid'] as List? ?? const [])
+        .map((item) => GridApp.fromJson(Map<String, dynamic>.from(item as Map)))
+        .toList();
 
-    return CacheData(grid, apps);
-  }
-
-  static gridAppToJson(GridApp gridApp) {
-    return gridApp.toJson();
-  }
-
-  static GridApp gridAppFromJson(Map<String, dynamic> json) {
-    return GridApp.fromJson(json);
+    return CacheData(grid, entries);
   }
 
   Map<String, dynamic> toJson() {
     return {
-      'grid': grid.map((x) => gridAppToJson(x)).toList(),
-      'apps': apps.map((x, y) => MapEntry(x, y.toJson()))
+      'grid': grid.map((app) => app.toJson()).toList(),
+      'entries': entries.map((key, value) => MapEntry(key, value.toJson())),
     };
   }
 }
 
 class GridApp {
-  final String packageName;
+  String entryId;
   String? iconSlug;
+  Map<String, dynamic>? icon;
 
-  GridApp(this.packageName, this.iconSlug);
+  GridApp(this.entryId, {this.iconSlug, this.icon});
 
   factory GridApp.fromJson(Map<String, dynamic> json) {
-    return GridApp(json['packageName'], json['iconSlug']);
+    return GridApp(
+      json['entryId'] as String? ?? json['packageName'] as String,
+      iconSlug: json['iconSlug'] as String?,
+      icon: json['icon'] == null
+          ? null
+          : Map<String, dynamic>.from(json['icon'] as Map),
+    );
   }
 
   Map<String, dynamic> toJson() {
-    return {'packageName': packageName, 'iconSlug': iconSlug};
+    return {
+      'entryId': entryId,
+      'packageName': entryId,
+      'iconSlug': iconSlug,
+      'icon': icon,
+    };
   }
 }
 
-class App {
-  final String appName, packageName;
+class LauncherEntry {
+  final String id;
+  final String title;
+  final String packageName;
+  final String? activityName;
+  final String? shortcutId;
+  final int? userHash;
+  final String? versionName;
+  final LauncherEntryType type;
 
-  App(this.appName, this.packageName);
+  LauncherEntry({
+    required this.id,
+    required this.title,
+    required this.packageName,
+    required this.type,
+    this.activityName,
+    this.shortcutId,
+    this.userHash,
+    this.versionName,
+  });
 
-  factory App.fromJson(Map<String, dynamic> json) =>
-      App(json['appName'], json['packageName']);
+  factory LauncherEntry.fromNative(Map<String, dynamic> json) {
+    return LauncherEntry(
+      id: json['id'] as String,
+      title: json['title'] as String? ?? json['packageName'] as String,
+      packageName: json['packageName'] as String,
+      activityName: json['activityName'] as String?,
+      shortcutId: json['shortcutId'] as String?,
+      userHash: json['userHash'] as int?,
+      versionName: json['versionName'] as String?,
+      type: _typeFromString(json['type'] as String?),
+    );
+  }
 
-  factory App.fromApplication(Application application) =>
-      App(application.appName, application.packageName);
+  factory LauncherEntry.fromJson(Map<String, dynamic> json) {
+    if (json.containsKey('appName')) {
+      final packageName = json['packageName'] as String;
+      return LauncherEntry(
+        id: packageName,
+        title: json['appName'] as String? ?? packageName,
+        packageName: packageName,
+        type: LauncherEntryType.activity,
+      );
+    }
+
+    return LauncherEntry(
+      id: json['id'] as String? ?? json['packageName'] as String,
+      title: json['title'] as String? ??
+          json['appName'] as String? ??
+          json['packageName'] as String,
+      packageName: json['packageName'] as String,
+      activityName: json['activityName'] as String?,
+      shortcutId: json['shortcutId'] as String?,
+      userHash: json['userHash'] as int?,
+      versionName: json['versionName'] as String?,
+      type: _typeFromString(json['type'] as String?),
+    );
+  }
+
+  static LauncherEntryType _typeFromString(String? value) {
+    return value == LauncherEntryType.shortcut.name
+        ? LauncherEntryType.shortcut
+        : LauncherEntryType.activity;
+  }
+
+  bool matches(String filter) {
+    final needle = filter.trim().toLowerCase();
+    if (needle.isEmpty) {
+      return true;
+    }
+    return title.toLowerCase().contains(needle) ||
+        packageName.toLowerCase().contains(needle);
+  }
 
   Map<String, dynamic> toJson() {
-    return {'appName': appName, 'packageName': packageName};
+    return {
+      'id': id,
+      'title': title,
+      'packageName': packageName,
+      'activityName': activityName,
+      'shortcutId': shortcutId,
+      'userHash': userHash,
+      'versionName': versionName,
+      'type': type.name,
+    };
+  }
+}
+
+class LauncherSettings {
+  final ThemeMode themeMode;
+  final String? lightWallpaperPath;
+  final String? darkWallpaperPath;
+  final int homeColumns;
+  final bool frostedIconBackgrounds;
+  final double frostBlur;
+  final double frostOpacity;
+  final double iconBackgroundRadius;
+  final double iconBackgroundPadding;
+
+  const LauncherSettings({
+    this.themeMode = ThemeMode.system,
+    this.lightWallpaperPath,
+    this.darkWallpaperPath,
+    this.homeColumns = 2,
+    this.frostedIconBackgrounds = false,
+    this.frostBlur = 12,
+    this.frostOpacity = 0.56,
+    this.iconBackgroundRadius = 14,
+    this.iconBackgroundPadding = 8,
+  });
+
+  factory LauncherSettings.fromJson(Map<String, dynamic> json) {
+    return LauncherSettings(
+      themeMode: ThemeMode.values.firstWhere(
+        (mode) => mode.name == json['themeMode'],
+        orElse: () => ThemeMode.system,
+      ),
+      lightWallpaperPath: json['lightWallpaperPath'] as String?,
+      darkWallpaperPath: json['darkWallpaperPath'] as String?,
+      homeColumns: _boundedIntSetting(json['homeColumns'], 2, 1, 5),
+      frostedIconBackgrounds: json['frostedIconBackgrounds'] as bool? ?? false,
+      // iconFrost* was the original, icon-only setting. Keep reading it so
+      // existing launcher installs retain their chosen appearance.
+      frostBlur: _boundedSetting(
+        json['frostBlur'] ?? json['iconFrostBlur'],
+        12,
+        0,
+        30,
+      ),
+      frostOpacity: _boundedSetting(
+        json['frostOpacity'] ?? json['iconFrostOpacity'],
+        0.56,
+        0.05,
+        0.9,
+      ),
+      iconBackgroundRadius:
+          _boundedSetting(json['iconBackgroundRadius'], 14, 0, 32),
+      iconBackgroundPadding:
+          _boundedSetting(json['iconBackgroundPadding'], 8, 0, 24),
+    );
+  }
+
+  static double _boundedSetting(
+    dynamic value,
+    double fallback,
+    double minimum,
+    double maximum,
+  ) {
+    final number = value is num ? value.toDouble() : fallback;
+    return number.clamp(minimum, maximum);
+  }
+
+  static int _boundedIntSetting(
+    dynamic value,
+    int fallback,
+    int minimum,
+    int maximum,
+  ) {
+    final number = value is num ? value.toInt() : fallback;
+    return number.clamp(minimum, maximum);
+  }
+
+  LauncherSettings copyWith({
+    ThemeMode? themeMode,
+    String? lightWallpaperPath,
+    String? darkWallpaperPath,
+    bool clearLightWallpaper = false,
+    bool clearDarkWallpaper = false,
+    int? homeColumns,
+    bool? frostedIconBackgrounds,
+    double? frostBlur,
+    double? frostOpacity,
+    double? iconBackgroundRadius,
+    double? iconBackgroundPadding,
+  }) {
+    return LauncherSettings(
+      themeMode: themeMode ?? this.themeMode,
+      lightWallpaperPath: clearLightWallpaper
+          ? null
+          : lightWallpaperPath ?? this.lightWallpaperPath,
+      darkWallpaperPath: clearDarkWallpaper
+          ? null
+          : darkWallpaperPath ?? this.darkWallpaperPath,
+      homeColumns: homeColumns ?? this.homeColumns,
+      frostedIconBackgrounds:
+          frostedIconBackgrounds ?? this.frostedIconBackgrounds,
+      frostBlur: frostBlur ?? this.frostBlur,
+      frostOpacity: frostOpacity ?? this.frostOpacity,
+      iconBackgroundRadius: iconBackgroundRadius ?? this.iconBackgroundRadius,
+      iconBackgroundPadding:
+          iconBackgroundPadding ?? this.iconBackgroundPadding,
+    );
+  }
+
+  String? wallpaperFor(Brightness brightness) {
+    if (brightness == Brightness.dark) {
+      return darkWallpaperPath ?? lightWallpaperPath;
+    }
+    return lightWallpaperPath ?? darkWallpaperPath;
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'themeMode': themeMode.name,
+      'lightWallpaperPath': lightWallpaperPath,
+      'darkWallpaperPath': darkWallpaperPath,
+      'homeColumns': homeColumns,
+      'frostedIconBackgrounds': frostedIconBackgrounds,
+      'frostBlur': frostBlur,
+      'frostOpacity': frostOpacity,
+      'iconBackgroundRadius': iconBackgroundRadius,
+      'iconBackgroundPadding': iconBackgroundPadding,
+    };
   }
 }
 
 class AppListCacher extends ChangeNotifier {
-  String cacheKey = 'app_list_cache_v4';
+  static const String _cacheKey = 'app_list_cache_v5';
+  static const String _legacyCacheKey = 'app_list_cache_v4';
+  static const String _settingsKey = 'launcher_settings_v1';
+
   CacheData? data;
+  LauncherSettings settings = const LauncherSettings();
+  StreamSubscription<void>? _appChangeSubscription;
 
-  Future readCache() async {
-    dynamic value = await ReadCache.getString(key: cacheKey);
-    if (value != null) {
-      print("Reading from cache");
-      data = CacheData.fromJson(jsonDecode(value));
-      notifyListeners();
-    } else {
-      print("Cache read miss");
-    }
-  }
-
-  Future<Map<String, App>> getAppList() async {
-    if (data == null) {
-      await readCache();
-    }
-    // Do ~blocking get if there was nothing in cache
-    if (data == null) {
-      await updateCache();
-    } else {
+  Future<void> initialize() async {
+    await readSettings();
+    await getAppList();
+    _appChangeSubscription ??= LauncherBridge.appChanges.listen((_) {
       updateCache();
+    });
+  }
+
+  Future<void> readSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getString(_settingsKey);
+    if (value == null) {
+      return;
     }
-
-    return data!.apps;
-  }
-
-  Future<List<Application>> _readApps() async {
-    List<Application> apps = (await DeviceApps.getInstalledApplications(
-      includeSystemApps: true,
-      onlyAppsWithLaunchIntent: true,
-    ));
-    return apps;
-  }
-
-  flushChanges() {
-    assert(data != null);
-    WriteCache.setString(key: cacheKey, value: jsonEncode(data!.toJson()));
-    print("cache updated");
+    settings = LauncherSettings.fromJson(jsonDecode(value));
     notifyListeners();
   }
 
-  setGridCache(List<GridApp> apps) async {
+  Future<void> updateSettings(LauncherSettings nextSettings) async {
+    settings = nextSettings;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_settingsKey, jsonEncode(settings.toJson()));
+    notifyListeners();
+  }
+
+  Future<void> readCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value =
+        prefs.getString(_cacheKey) ?? prefs.getString(_legacyCacheKey);
+    if (value == null) {
+      return;
+    }
+    data = CacheData.fromJson(jsonDecode(value));
+    notifyListeners();
+  }
+
+  Future<Map<String, LauncherEntry>> getAppList() async {
+    if (data == null) {
+      await readCache();
+    }
+    if (data == null) {
+      await updateCache();
+    } else {
+      unawaited(updateCache());
+    }
+
+    return data!.entries;
+  }
+
+  Future<void> updateCache() async {
+    final nativeEntries = await LauncherBridge.getLauncherEntries();
+    final entries = <String, LauncherEntry>{};
+    for (final nativeEntry in nativeEntries) {
+      final entry = LauncherEntry.fromNative(nativeEntry);
+      entries[entry.id] = entry;
+    }
+
+    if (data == null) {
+      data = CacheData([], entries);
+    } else {
+      data!.entries = entries;
+      _migrateLegacyGridIds();
+      _removeMissingGridEntries();
+    }
+    await flushChanges();
+  }
+
+  Future<void> flushChanges() async {
+    assert(data != null);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_cacheKey, jsonEncode(data!.toJson()));
+    notifyListeners();
+  }
+
+  Future<void> setGridCache(List<GridApp> apps) async {
     if (data == null) {
       await updateCache();
     }
     data!.grid = apps;
-    flushChanges();
+    _migrateLegacyGridIds();
+    _removeMissingGridEntries();
+    await flushChanges();
   }
 
-  Future updateCache() async {
-    List<App> appList = (await _readApps())
-        .where((x) => x.enabled)
-        .map((x) => App.fromApplication(x))
-        .toList();
-    Map<String, App> apps = {};
-    for (final app in appList) {
-      apps[app.packageName] = app;
-    }
+  Future<void> addToGrid(LauncherEntry entry) async {
     if (data == null) {
-      data = CacheData([], apps);
-    } else {
-      data!.apps = apps;
+      await updateCache();
     }
-    flushChanges();
+    final exists = data!.grid.any((item) => item.entryId == entry.id);
+    if (!exists) {
+      data!.grid.add(GridApp(entry.id));
+      await flushChanges();
+    }
+  }
+
+  Future<void> removeFromGrid(String entryId) async {
+    if (data == null) {
+      return;
+    }
+    data!.grid.removeWhere((item) => item.entryId == entryId);
+    await flushChanges();
+  }
+
+  Future<void> moveGridItem(int oldIndex, int newIndex) async {
+    if (data == null) {
+      return;
+    }
+    if (newIndex > oldIndex) {
+      newIndex -= 1;
+    }
+    final item = data!.grid.removeAt(oldIndex);
+    data!.grid.insert(newIndex, item);
+    await flushChanges();
+  }
+
+  Future<void> moveGridItemToIndex(int oldIndex, int newIndex) async {
+    if (moveGridItemToIndexLive(oldIndex, newIndex)) {
+      await flushChanges();
+    }
+  }
+
+  bool moveGridItemToIndexLive(int oldIndex, int newIndex) {
+    if (data == null) {
+      return false;
+    }
+    if (oldIndex < 0 ||
+        newIndex < 0 ||
+        oldIndex >= data!.grid.length ||
+        newIndex >= data!.grid.length ||
+        oldIndex == newIndex) {
+      return false;
+    }
+    final item = data!.grid.removeAt(oldIndex);
+    data!.grid.insert(newIndex, item);
+    notifyListeners();
+    return true;
+  }
+
+  LauncherEntry? entryFor(GridApp gridApp) {
+    return data?.entries[gridApp.entryId] ??
+        _entryForLegacyPackage(gridApp.entryId);
+  }
+
+  List<LauncherEntry> sortedEntries() {
+    final entries = data?.entries.values.toList() ?? <LauncherEntry>[];
+    entries.sort(
+      (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+    );
+    return entries;
+  }
+
+  /// Apps are always searchable. Shortcuts intentionally become searchable
+  /// only after they have been added to the home grid.
+  List<LauncherEntry> searchableEntries() {
+    final homeEntryIds = data?.grid.map((item) => item.entryId).toSet() ?? {};
+    return sortedEntries()
+        .where(
+          (entry) =>
+              entry.type == LauncherEntryType.activity ||
+              homeEntryIds.contains(entry.id),
+        )
+        .toList(growable: false);
+  }
+
+  void _migrateLegacyGridIds() {
+    if (data == null) {
+      return;
+    }
+    for (final item in data!.grid) {
+      if (data!.entries.containsKey(item.entryId)) {
+        continue;
+      }
+      final entry = _entryForLegacyPackage(item.entryId);
+      if (entry != null) {
+        item.entryId = entry.id;
+      }
+    }
+  }
+
+  void _removeMissingGridEntries() {
+    data!.grid.removeWhere((item) => !data!.entries.containsKey(item.entryId));
+  }
+
+  LauncherEntry? _entryForLegacyPackage(String packageName) {
+    for (final entry in data?.entries.values ?? <LauncherEntry>[]) {
+      if (entry.packageName == packageName &&
+          entry.type == LauncherEntryType.activity) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  @override
+  void dispose() {
+    _appChangeSubscription?.cancel();
+    super.dispose();
   }
 }

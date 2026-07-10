@@ -1,47 +1,42 @@
-# This is a basic workflow to help you get started with Actions
+name: Release APK
 
-name: Build and Release APK
-
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
   push:
-    branches: [ "release" ]
-
-  # Allows you to run this workflow manually from the Actions tab
+    tags:
+      - 'v*'
   workflow_dispatch:
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+permissions:
+  contents: write
+
 jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
+  release:
     runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-    - uses: actions/checkout@v3
-    - uses: DeterminateSystems/nix-installer-action@main
-    - uses: DeterminateSystems/magic-nix-cache-action@main
-    - run: |
-        tag=$(cat pubspec.yaml | grep '^version:' | sed 's/^version:\s*\(.*\)\s*$/\1/g')
-        echo "app_tag=$tag" >> $GITHUB_ENV
-        echo "Setting app tag as $tag"
-        echo "From github ${{ env.app_tag }} "
-    - run: nix flake check
-    - run: nix develop --command flutter pub get
-    # Enable when test is written
-    # - run: nix develop --command flutter test
-    - run: nix develop --command flutter build apk --release
-    - name: Create Github Release
-      uses: ncipollo/release-action@v1
-      with:
-        commit: ${{ github.sha }}
-        tag: ${{ env.app_tag }}
-        artifacts: "build/app/outputs/flutter-apk/app-release.apk"
-
-    - name: Save APK to Artifacts
-      uses: actions/upload-artifact@v2
-      with:
-        name: APK
-        path: build/app/outputs/flutter-apk/app-release.apk
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - run: nix flake check
+      - run: nix develop --command flutter pub get
+      - run: nix develop --command flutter analyze --no-pub
+      - run: nix develop --command flutter build apk --release
+      - id: artifact
+        name: Name release artifact
+        run: |
+          version=$(sed -n 's/^version: *//p' pubspec.yaml)
+          file_name="nkit-launcher-${version}.apk"
+          mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/${file_name}"
+          echo "file_name=${file_name}" >> "$GITHUB_OUTPUT"
+          echo "path=build/app/outputs/flutter-apk/${file_name}" >> "$GITHUB_OUTPUT"
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: ${{ steps.artifact.outputs.path }}
+      - name: Save APK to workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.file_name }}
+          path: ${{ steps.artifact.outputs.path }}

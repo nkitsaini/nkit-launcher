@@ -1,431 +1,1247 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui';
 
-import 'package:android_intent_plus/android_intent.dart';
-import 'package:android_intent_plus/flag.dart';
 import 'package:flutter/material.dart';
-import 'package:device_apps/device_apps.dart';
-import 'package:flutter_file_dialog/flutter_file_dialog.dart';
-import 'package:nkit_launcher/app_icon.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter_iconpicker/flutter_iconpicker.dart';
 
+import 'app_icon.dart';
 import 'app_list.dart';
+import 'icon_picker/catalog.dart';
+import 'icon_picker/picker.dart';
+import 'launcher_bridge.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => AppListCacher()..initialize(),
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Nkit Launcher',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        brightness: Brightness.light,
-        // brightness:
-        //     SchedulerBinding.instance.platformDispatcher.platformBrightness,
-        // colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
-        useMaterial3: true,
-      ),
-      home: const MyHomePage(title: 'Nkit Launcher Home Page'),
+    return Consumer<AppListCacher>(
+      builder: (context, appList, child) {
+        return MaterialApp(
+          title: 'Nkit Launcher',
+          themeMode: appList.settings.themeMode,
+          theme: ThemeData(
+            brightness: Brightness.light,
+            useMaterial3: true,
+          ),
+          darkTheme: ThemeData(
+            brightness: Brightness.dark,
+            useMaterial3: true,
+          ),
+          home: const MyHomePage(),
+        );
+      },
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+  const MyHomePage({super.key});
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
 class _MyHomePageState extends State<MyHomePage> {
+  final TextEditingController textController = TextEditingController();
   String? filterSearch;
-  TextEditingController textController = TextEditingController();
-  UnfocusDisposition disposition = UnfocusDisposition.scope;
+
+  @override
+  void dispose() {
+    textController.dispose();
+    super.dispose();
+  }
+
+  void _clearSearch() {
+    textController.clear();
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      filterSearch = null;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    unfocusTextField() {
-      textController.clear();
-      primaryFocus!.unfocus(disposition: disposition);
-      setState(() {
-        filterSearch = null;
-      });
-    }
+    final brightness = Theme.of(context).brightness;
 
-    List<Widget> children = [];
-    if (filterSearch == null) {
-      children.add(const Expanded(child: IconAppGridWidget()));
-    } else {
-      children.add(Expanded(
-        child: AppListWidget(
-          filterKey: filterSearch,
-          onAppOpen: () {
-            unfocusTextField();
-          },
-        ),
-      ));
-      children.add(IconButton(
-        icon: const Icon(Icons.close),
-        onPressed: () {
-          unfocusTextField();
-        },
-      ));
-    }
-
-    children.add(Row(
-      children: [
-        Expanded(
-          child: Consumer<AppListCacher>(builder: (context, appList, child) {
-            int appCount = 0;
-            if (appList.data != null) {
-              appCount = appList.data!.apps.length;
-            }
-
-            return TextField(
-              controller: textController,
-              decoration: InputDecoration(
-                border: const UnderlineInputBorder(),
-                contentPadding: const EdgeInsets.all(8.0),
-                hintText: 'Search $appCount apps',
-              ),
-              onChanged: (value) => {
-                setState(() {
-                  filterSearch = value;
-                })
-              },
-              onTap: () {
-                setState(() {
-                  filterSearch = '';
-                });
-              },
-              autocorrect: false,
-              autofocus: false,
-              // focusNode: messageFocus,
-            );
-          }),
-        ),
-        Consumer<AppListCacher>(builder: (context, appList, child) {
-          return IconButton(
-            icon: const Icon(Icons.more_vert),
-            tooltip: "Options",
-            onPressed: () async {
-              GlobalAction? action = await askGlobalAction(context);
-              switch (action) {
-                case GlobalAction.refreshApps:
-                  await appList.updateCache();
-                case GlobalAction.exportGridJson:
-                  if (appList.data == null) {
-                    return;
-                  }
-                  var grid = appList.data!.grid.map((x) => x.toJson()).toList();
-                  final body = json.encode(grid);
-                  final params = SaveFileDialogParams(
-                      data: const Utf8Encoder().convert(body),
-                      fileName: "nkit_launcher_grid.json");
-                  await FlutterFileDialog.saveFile(params: params);
-                case GlobalAction.importGridJson:
-                  var file = await FlutterFileDialog.pickFile(
-                      params: const OpenFileDialogParams());
-                  if (file != null) {
-                    var fileContent = File(file).readAsStringSync();
-                    var content = json.decode(fileContent);
-
-                    appList.setGridCache((content as List)
-                        .map((x) => GridApp.fromJson(x))
-                        .toList());
-                  }
-                  await appList.updateCache();
-                case null:
-              }
-            },
+    return Consumer<AppListCacher>(
+      builder: (context, appList, child) {
+        final wallpaperPath = appList.settings.wallpaperFor(brightness);
+        final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+        final children = <Widget>[];
+        if (filterSearch == null) {
+          children.add(const Expanded(child: IconAppGridWidget()));
+        } else {
+          children.add(
+            Expanded(
+              child: wallpaperPath == null
+                  ? AppListWidget(
+                      filterKey: filterSearch ?? '',
+                      onAppOpen: _clearSearch,
+                    )
+                  : _FrostedSurface(
+                      settings: appList.settings,
+                      child: AppListWidget(
+                        filterKey: filterSearch ?? '',
+                        onAppOpen: _clearSearch,
+                      ),
+                    ),
+            ),
           );
-        })
-      ],
-    ));
+        }
+        final searchRow = Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: textController,
+                decoration: InputDecoration(
+                  border: const UnderlineInputBorder(),
+                  contentPadding: const EdgeInsets.all(8.0),
+                  hintText: 'Search ${appList.searchableEntries().length} apps',
+                ),
+                onChanged: (value) => setState(() => filterSearch = value),
+                onTap: () => setState(() => filterSearch = ''),
+                autocorrect: false,
+                autofocus: false,
+              ),
+            ),
+            IconButton(
+              icon: Icon(
+                filterSearch == null ? Icons.more_vert : Icons.close,
+              ),
+              tooltip: filterSearch == null ? 'Options' : 'Close search',
+              onPressed: filterSearch == null
+                  ? () => _showGlobalActions(context)
+                  : _clearSearch,
+            ),
+          ],
+        );
+        children.add(
+          Padding(
+            padding: EdgeInsets.only(bottom: keyboardInset),
+            child: SafeArea(
+              top: false,
+              child: wallpaperPath == null
+                  ? searchRow
+                  : _FrostedSurface(
+                      settings: appList.settings,
+                      child: searchRow,
+                    ),
+            ),
+          ),
+        );
 
-    return Scaffold(
-        body: ChangeNotifierProvider(
-            create: (context) {
-              AppListCacher cacher = AppListCacher();
-              cacher.getAppList(); // TODO: handle error
-              return cacher;
-            },
-            child: Column(
-              children: children,
-            )));
+        return Scaffold(
+          resizeToAvoidBottomInset: false,
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              ColoredBox(color: Theme.of(context).colorScheme.surface),
+              if (wallpaperPath != null)
+                Image.file(
+                  File(wallpaperPath),
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) =>
+                      const SizedBox.shrink(),
+                ),
+              if (wallpaperPath != null)
+                ColoredBox(
+                  color: Theme.of(context).colorScheme.surface.withValues(
+                      alpha: brightness == Brightness.dark ? 0.32 : 0.18),
+                ),
+              BackdropGroup(child: Column(children: children)),
+            ],
+          ),
+        );
+      },
+    );
   }
-}
-
-class AppListWidget extends StatefulWidget {
-  const AppListWidget(
-      {super.key, required this.filterKey, required this.onAppOpen});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String? filterKey;
-  final Function() onAppOpen;
-
-  @override
-  State<AppListWidget> createState() => AppListState();
 }
 
 class IconAppGridWidget extends StatelessWidget {
-  const IconAppGridWidget({super.key}) : super();
+  const IconAppGridWidget({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<AppListCacher>(builder: (context, appList, child) {
-      if (appList.data == null) {
-        return const Row(children: []);
-      }
-
-      longPressActionHandler(int index) async {
-        var item = appList.data!.grid[index];
-        var app = appList.data!.apps[item.packageName];
-        GridIconAction? action =
-            await askGridIconAction(context, app?.appName ?? "Unknown");
-        switch (action) {
-          case GridIconAction.selectIcon:
-            IconData? icon =
-                await showIconPicker(context, customIconPack: icons);
-            if (icon != null) {
-              appList.data!.grid[index].iconSlug = iconDataToName(icon);
-            }
-            appList.flushChanges();
-          case GridIconAction.remove:
-            appList.data!.grid.removeAt(index);
-            appList.flushChanges();
-          case GridIconAction.moveToLeft:
-            if (index != 0) {
-              GridApp app = appList.data!.grid.removeAt(index);
-              appList.data!.grid.insert(index - 1, app);
-              appList.flushChanges();
-            }
-          case GridIconAction.moveToRight:
-            if (index != appList.data!.grid.length - 1) {
-              GridApp app = appList.data!.grid.removeAt(index);
-              appList.data!.grid.insert(index + 1, app);
-              appList.flushChanges();
-            }
-          case null:
+    return Consumer<AppListCacher>(
+      builder: (context, appList, child) {
+        if (appList.data == null) {
+          return const Row(children: []);
         }
-      }
 
-      List<GridApp> apps = appList.data!.grid;
-
-      List<Widget> children = [];
-      const iconSize = 48.0;
-      for (final (index, app) in apps.indexed) {
-        IconButton button;
-        Widget icon;
-        if (app.iconSlug == null) {
-          icon = const Icon(Icons.bolt, size: iconSize);
-        } else {
-          icon = Icon(icons[app.iconSlug!], size: iconSize);
+        final children = <Widget>[];
+        const iconSize = 48.0;
+        for (final (index, item) in appList.data!.grid.indexed) {
+          final entry = appList.entryFor(item);
+          if (entry == null) {
+            continue;
+          }
+          final icon = _gridIcon(item, entry, size: iconSize);
+          children.add(
+            GestureDetector(
+              onLongPress: () => _showGridItemActions(context, index),
+              // Keep a comfortably large touch target, but constrain the
+              // visible frost to the icon and its configured breathing room.
+              child: IconButton(
+                icon: _FrostedHomeIcon(
+                  settings: appList.settings,
+                  child: icon,
+                ),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                onPressed: () => _openEntry(context, entry),
+              ),
+            ),
+          );
         }
-        button = IconButton(
-          icon: icon,
-          onPressed: () {
-            DeviceApps.openApp(app.packageName);
-          },
+        return GridView.count(
+          childAspectRatio: 1.5,
+          crossAxisCount: appList.settings.homeColumns,
+          children: children,
         );
-
-        children.add(GestureDetector(
-            child: button,
-            onLongPress: () {
-              longPressActionHandler(index);
-            }));
-      }
-      return GridView.count(
-        childAspectRatio: 1.5,
-        crossAxisCount: 2,
-        children: children,
-      );
-    });
+      },
+    );
   }
 }
 
-enum GridIconAction { selectIcon, moveToLeft, moveToRight, remove }
+class _FrostedHomeIcon extends StatelessWidget {
+  const _FrostedHomeIcon({required this.settings, required this.child});
 
-Future<GridIconAction?> askGridIconAction(
-    BuildContext context, String title) async {
-  return await showDialog<GridIconAction>(
-      context: context,
-      builder: (BuildContext context) {
-        List<Widget> children = [
-          SimpleDialogOption(
-              onPressed: () =>
-                  Navigator.pop(context, GridIconAction.selectIcon),
-              child: const Text('Select Icon')),
-          SimpleDialogOption(
-              onPressed: () => Navigator.pop(context, GridIconAction.remove),
-              child: const Text('Remove')),
-          SimpleDialogOption(
-              onPressed: () =>
-                  Navigator.pop(context, GridIconAction.moveToLeft),
-              child: const Text('Move to Left')),
-          SimpleDialogOption(
-              onPressed: () =>
-                  Navigator.pop(context, GridIconAction.moveToRight),
-              child: const Text('Move to Right')),
-        ];
-        return SimpleDialog(
-          title: Text(title),
-          children: children,
+  final LauncherSettings settings;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!settings.frostedIconBackgrounds) {
+      return child;
+    }
+    return Align(
+      widthFactor: 1,
+      heightFactor: 1,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(settings.iconBackgroundRadius),
+        child: BackdropFilter.grouped(
+          filter: ImageFilter.blur(
+            sigmaX: settings.frostBlur,
+            sigmaY: settings.frostBlur,
+          ),
+          child: ColoredBox(
+            color: Theme.of(context)
+                .colorScheme
+                .surface
+                .withValues(alpha: settings.frostOpacity),
+            child: Padding(
+              padding: EdgeInsets.all(settings.iconBackgroundPadding),
+              child: child,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// All wallpaper overlays use the same visual controls.  Sharing the group
+/// also lets the engine reuse one backdrop read while the home grid scrolls.
+class _FrostedSurface extends StatelessWidget {
+  const _FrostedSurface({required this.settings, required this.child});
+
+  final LauncherSettings settings;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRect(
+      child: BackdropFilter.grouped(
+        filter: ImageFilter.blur(
+          sigmaX: settings.frostBlur,
+          sigmaY: settings.frostBlur,
+        ),
+        child: ColoredBox(
+          color: Theme.of(context)
+              .colorScheme
+              .surface
+              .withValues(alpha: settings.frostOpacity),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+Widget _gridIcon(GridApp item, LauncherEntry entry, {double size = 24}) {
+  if (item.icon != null || item.iconSlug != null) {
+    return Icon(_iconForGridItem(item, entry), size: size);
+  }
+  return _EntryIcon(entry: entry, size: size, fallback: Icons.bolt);
+}
+
+class _EntryIcon extends StatefulWidget {
+  const _EntryIcon({
+    required this.entry,
+    required this.size,
+    required this.fallback,
+  });
+
+  final LauncherEntry entry;
+  final double size;
+  final IconData fallback;
+
+  @override
+  State<_EntryIcon> createState() => _EntryIconState();
+}
+
+class _EntryIconState extends State<_EntryIcon> {
+  static final Map<String, Future<Uint8List?>> _cachedIcons = {};
+  late Future<Uint8List?> _icon;
+
+  @override
+  void initState() {
+    super.initState();
+    _icon = _cachedIcons.putIfAbsent(widget.entry.id, () async {
+      try {
+        return await LauncherBridge.getEntryIcon(widget.entry.toJson());
+      } catch (_) {
+        return null;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Uint8List?>(
+      future: _icon,
+      builder: (context, snapshot) {
+        final bytes = snapshot.data;
+        if (bytes == null) {
+          return Icon(widget.fallback, size: widget.size);
+        }
+        return Image.memory(
+          bytes,
+          width: widget.size,
+          height: widget.size,
+          filterQuality: FilterQuality.medium,
         );
-      });
+      },
+    );
+  }
 }
 
-enum GlobalAction { refreshApps, exportGridJson, importGridJson }
+class AppListWidget extends StatelessWidget {
+  const AppListWidget({
+    super.key,
+    required this.filterKey,
+    required this.onAppOpen,
+  });
 
-Future<GlobalAction?> askGlobalAction(BuildContext context) async {
-  return await showDialog<GlobalAction>(
-      context: context,
-      builder: (BuildContext context) {
-        List<Widget> children = [
-          SimpleDialogOption(
-              onPressed: () => Navigator.pop(context, GlobalAction.refreshApps),
-              child: const Text('Refresh Apps')),
-          SimpleDialogOption(
-              onPressed: () =>
-                  Navigator.pop(context, GlobalAction.exportGridJson),
-              child: const Text('Export Grid Action')),
-          SimpleDialogOption(
-              onPressed: () =>
-                  Navigator.pop(context, GlobalAction.importGridJson),
-              child: const Text('Import Grid Action')),
-        ];
-        return SimpleDialog(children: children);
-      });
-}
+  final String filterKey;
+  final VoidCallback onAppOpen;
 
-enum AppAction { addToGrid, openAppSettings }
-
-Future<AppAction?> askAppActions(BuildContext context) async {
-  return await showDialog<AppAction>(
-      context: context,
-      builder: (BuildContext context) {
-        List<Widget> children = [
-          SimpleDialogOption(
-              onPressed: () => Navigator.pop(context, AppAction.addToGrid),
-              child: const Text('Add To Grid')),
-          SimpleDialogOption(
-              onPressed: () =>
-                  Navigator.pop(context, AppAction.openAppSettings),
-              child: const Text('Open App Setting')),
-        ];
-        return SimpleDialog(children: children);
-      });
-}
-
-class AppListState extends State<AppListWidget> {
-  Widget projectWidget() {
+  @override
+  Widget build(BuildContext context) {
     return Consumer<AppListCacher>(
       builder: (context, appList, child) {
-        // messageFocus.requestFocus();
         if (appList.data == null) {
-          // This is very very short lived
-          return const Text(
-            'loading ...',
-            style: TextStyle(fontSize: 32),
-          );
+          return const Text('loading ...', style: TextStyle(fontSize: 32));
         }
 
-        List<App> apps = appList.data!.apps.values.toList();
-        if (widget.filterKey == null) {
-          return const Row();
-        }
+        final entries = appList
+            .searchableEntries()
+            .where((entry) => entry.matches(filterKey))
+            .toList();
 
-        String filterKey = widget.filterKey!;
-
-        bool isFiltered = filterKey != '';
-        apps.sort(
-          (a, b) => a.appName.toLowerCase().compareTo(b.appName.toLowerCase()),
-        );
-
-        apps.removeWhere((app) =>
-            !app.appName.toLowerCase().contains(filterKey.toLowerCase()));
-        print('App length: ${apps.length}');
         return ListView.builder(
-          reverse: isFiltered,
-          itemCount: apps.length,
+          reverse: filterKey.isNotEmpty,
+          itemCount: entries.length,
           itemBuilder: (context, index) {
-            App app = apps[index];
+            final entry = entries[index];
             return GestureDetector(
               child: ListTile(
-                title:
-                    Text(app.appName, style: const TextStyle(fontSize: 18.0)),
+                title: Text(entry.title, style: const TextStyle(fontSize: 18)),
               ),
-              onTap: () {
-                DeviceApps.openApp(app.packageName);
-                widget.onAppOpen();
+              onTap: () async {
+                await _openEntry(context, entry);
+                onAppOpen();
               },
-              onLongPress: () async {
-                AppAction? action = await askAppActions(context);
-                switch (action) {
-                  case AppAction.openAppSettings:
-                    AndroidIntent intent = AndroidIntent(
-                      action: 'action_application_details_settings',
-                      data: 'package:${app.packageName}',
-                      flags: <int>[Flag.FLAG_ACTIVITY_NEW_TASK],
-                    );
-                    intent.launch();
-                  case AppAction.addToGrid:
-                    appList.data!.grid.add(GridApp(app.packageName, null));
-                    await appList.flushChanges();
-                  case null:
-                }
-              },
+              onLongPress: () => _showEntryActions(context, entry),
             );
           },
         );
       },
     );
   }
+}
+
+Future<void> _showGlobalActions(BuildContext context) async {
+  final appList = context.read<AppListCacher>();
+  final action = await showModalBottomSheet<GlobalAction>(
+    context: context,
+    builder: (context) {
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.grid_view),
+              title: const Text('Set up home'),
+              onTap: () => Navigator.pop(context, GlobalAction.setupHome),
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings),
+              title: const Text('Launcher settings'),
+              onTap: () =>
+                  Navigator.pop(context, GlobalAction.launcherSettings),
+            ),
+            ListTile(
+              leading: const Icon(Icons.refresh),
+              title: const Text('Refresh apps'),
+              onTap: () => Navigator.pop(context, GlobalAction.refreshApps),
+            ),
+            ListTile(
+              leading: const Icon(Icons.file_upload),
+              title: const Text('Export grid'),
+              onTap: () => Navigator.pop(context, GlobalAction.exportGridJson),
+            ),
+            ListTile(
+              leading: const Icon(Icons.file_download),
+              title: const Text('Import grid'),
+              onTap: () => Navigator.pop(context, GlobalAction.importGridJson),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+
+  if (!context.mounted) {
+    return;
+  }
+
+  switch (action) {
+    case GlobalAction.setupHome:
+      await _showHomeSetup(context);
+    case GlobalAction.launcherSettings:
+      await _showLauncherSettings(context);
+    case GlobalAction.refreshApps:
+      await appList.updateCache();
+    case GlobalAction.exportGridJson:
+      if (appList.data == null) {
+        return;
+      }
+      final body =
+          json.encode(appList.data!.grid.map((x) => x.toJson()).toList());
+      await LauncherBridge.saveTextFile(
+        fileName: 'nkit_launcher_grid.json',
+        content: body,
+      );
+    case GlobalAction.importGridJson:
+      final file = await LauncherBridge.pickFile(mimeType: 'application/json');
+      if (file != null) {
+        final fileContent = File(file).readAsStringSync();
+        final content = json.decode(fileContent);
+        await appList.setGridCache(
+          (content as List)
+              .map((x) => GridApp.fromJson(Map<String, dynamic>.from(x as Map)))
+              .toList(),
+        );
+      }
+    case null:
+  }
+}
+
+Future<void> _showHomeSetup(BuildContext context) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (context) => const _HomeSetupSheet(),
+  );
+}
+
+class _HomeSetupSheet extends StatefulWidget {
+  const _HomeSetupSheet();
+
+  @override
+  State<_HomeSetupSheet> createState() => _HomeSetupSheetState();
+}
+
+class _HomeSetupSheetState extends State<_HomeSetupSheet> {
+  final TextEditingController _filterController = TextEditingController();
+  String _filter = '';
+
+  @override
+  void dispose() {
+    _filterController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: projectWidget(),
+    return DefaultTabController(
+      length: 2,
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.88,
+        child: Column(
+          children: [
+            const TabBar(
+              tabs: [
+                Tab(icon: Icon(Icons.add), text: 'Add'),
+                Tab(icon: Icon(Icons.drag_handle), text: 'Arrange'),
+              ],
+            ),
+            Expanded(
+              child: Consumer<AppListCacher>(
+                builder: (context, appList, child) {
+                  if (appList.data == null) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  return TabBarView(
+                    children: [
+                      _buildAddTab(context, appList),
+                      _buildArrangeTab(context, appList),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAddTab(BuildContext context, AppListCacher appList) {
+    final entries = appList
+        .sortedEntries()
+        .where((entry) => entry.matches(_filter))
+        .toList();
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: TextField(
+            controller: _filterController,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.search),
+              hintText: 'Search apps and shortcuts',
+            ),
+            onChanged: (value) => setState(() => _filter = value),
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            itemCount: entries.length,
+            itemBuilder: (context, index) {
+              final entry = entries[index];
+              final isOnGrid =
+                  appList.data!.grid.any((item) => item.entryId == entry.id);
+              return CheckboxListTile(
+                secondary: _EntryIcon(
+                  entry: entry,
+                  size: 28,
+                  fallback: _defaultIconForEntry(entry),
+                ),
+                value: isOnGrid,
+                title: Text(entry.title),
+                subtitle: Text(
+                  entry.type == LauncherEntryType.shortcut
+                      ? 'Shortcut - ${entry.packageName}'
+                      : entry.packageName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onChanged: (checked) {
+                  if (checked == true) {
+                    appList.addToGrid(entry);
+                  } else {
+                    appList.removeFromGrid(entry.id);
+                  }
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildArrangeTab(BuildContext context, AppListCacher appList) {
+    final grid = appList.data!.grid;
+    if (grid.isEmpty) {
+      return const Center(child: Text('Home is empty'));
+    }
+    return Column(
+      children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(12, 12, 12, 4),
+          child:
+              Text('Long press, then drag over a tile to move into its spot.'),
+        ),
+        Expanded(
+          child: GridView.builder(
+            padding: const EdgeInsets.all(12),
+            itemCount: grid.length,
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: appList.settings.homeColumns,
+              childAspectRatio: 1.5,
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+            ),
+            itemBuilder: (context, index) {
+              final item = grid[index];
+              final entry = appList.entryFor(item);
+              if (entry == null) {
+                return const SizedBox.shrink();
+              }
+              return DragTarget<String>(
+                key: ValueKey('arrange-target-${item.entryId}'),
+                onWillAcceptWithDetails: (details) {
+                  if (details.data == item.entryId) {
+                    return false;
+                  }
+                  final currentGrid = appList.data!.grid;
+                  final oldIndex = currentGrid.indexWhere(
+                    (gridItem) => gridItem.entryId == details.data,
+                  );
+                  final targetIndex = currentGrid.indexWhere(
+                    (gridItem) => gridItem.entryId == item.entryId,
+                  );
+                  if (oldIndex >= 0 && targetIndex >= 0) {
+                    appList.moveGridItemToIndexLive(oldIndex, targetIndex);
+                  }
+                  return true;
+                },
+                builder: (context, candidateData, __) {
+                  _ArrangeGridTile tile({bool isDropTarget = false}) {
+                    return _ArrangeGridTile(
+                      item: item,
+                      entry: entry,
+                      isDropTarget: isDropTarget,
+                      onSelectIcon: () => _selectGridIcon(context, index),
+                      onRemove: () => appList.removeFromGrid(item.entryId),
+                    );
+                  }
+
+                  return LongPressDraggable<String>(
+                    key: ValueKey('arrange-drag-${item.entryId}'),
+                    data: item.entryId,
+                    onDragEnd: (_) async => appList.flushChanges(),
+                    feedback: Material(
+                      color: Colors.transparent,
+                      child: SizedBox(width: 150, child: tile()),
+                    ),
+                    childWhenDragging: Opacity(opacity: 0.25, child: tile()),
+                    child: tile(isDropTarget: candidateData.isNotEmpty),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
+
+class _ArrangeGridTile extends StatelessWidget {
+  const _ArrangeGridTile({
+    required this.item,
+    required this.entry,
+    required this.isDropTarget,
+    required this.onSelectIcon,
+    required this.onRemove,
+  });
+
+  final GridApp item;
+  final LauncherEntry entry;
+  final bool isDropTarget;
+  final VoidCallback onSelectIcon;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: isDropTarget
+            ? Theme.of(context).colorScheme.secondaryContainer
+            : Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        border: isDropTarget
+            ? Border.all(color: Theme.of(context).colorScheme.primary, width: 2)
+            : null,
+      ),
+      child: Stack(
+        children: [
+          Center(child: _gridIcon(item, entry, size: 36)),
+          Positioned(
+            left: 2,
+            bottom: 2,
+            child: IconButton(
+              icon: const Icon(Icons.palette, size: 18),
+              tooltip: 'Choose icon',
+              onPressed: onSelectIcon,
+            ),
+          ),
+          Positioned(
+            right: 2,
+            bottom: 2,
+            child: IconButton(
+              icon: const Icon(Icons.remove_circle_outline, size: 18),
+              tooltip: 'Remove from home',
+              onPressed: onRemove,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Future<void> _showLauncherSettings(BuildContext context) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (context) => const _LauncherSettingsSheet(),
+  );
+}
+
+class _LauncherSettingsSheet extends StatelessWidget {
+  const _LauncherSettingsSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.72,
+      child: Consumer<AppListCacher>(
+        builder: (context, appList, child) {
+          final settings = appList.settings;
+          return ListView(
+            padding: const EdgeInsets.only(bottom: 24),
+            children: [
+              const ListTile(
+                leading: Icon(Icons.settings),
+                title: Text('Launcher settings'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.contrast),
+                title: const Text('Theme mode'),
+                subtitle: Text(_themeModeLabel(settings.themeMode)),
+                onTap: () => _showThemeModeDialog(context),
+              ),
+              ListTile(
+                leading: const Icon(Icons.wallpaper),
+                title: const Text('Wallpapers'),
+                subtitle: const Text('Light and dark wallpaper'),
+                onTap: () => _showWallpaperDialog(context),
+              ),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.grid_view),
+                title: const Text('Home grid columns'),
+                subtitle: Text('${settings.homeColumns} columns'),
+                trailing: DropdownButtonHideUnderline(
+                  child: DropdownButton<int>(
+                    value: settings.homeColumns,
+                    items: List.generate(
+                      5,
+                      (index) => DropdownMenuItem(
+                        value: index + 1,
+                        child: Text('${index + 1}'),
+                      ),
+                    ),
+                    onChanged: (columns) {
+                      if (columns != null) {
+                        appList.updateSettings(
+                          settings.copyWith(homeColumns: columns),
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ),
+              const Divider(),
+              const ListTile(
+                leading: Icon(Icons.blur_on),
+                title: Text('Frost effect'),
+                subtitle: Text('Used by search, the search bar, and icon tiles'),
+              ),
+              _FrostControls(settings: settings),
+              SwitchListTile(
+                secondary: const Icon(Icons.blur_on),
+                title: const Text('Frosted icon backgrounds'),
+                subtitle:
+                    const Text('Add a frosted rectangle behind home icons'),
+                value: settings.frostedIconBackgrounds,
+                onChanged: (enabled) => appList.updateSettings(
+                  settings.copyWith(frostedIconBackgrounds: enabled),
+                ),
+              ),
+              if (settings.frostedIconBackgrounds)
+                _IconBackgroundControls(settings: settings),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+String _themeModeLabel(ThemeMode mode) {
+  return switch (mode) {
+    ThemeMode.system => 'System default',
+    ThemeMode.light => 'Light',
+    ThemeMode.dark => 'Dark',
+  };
+}
+
+class _FrostControls extends StatefulWidget {
+  const _FrostControls({required this.settings});
+
+  final LauncherSettings settings;
+
+  @override
+  State<_FrostControls> createState() => _FrostControlsState();
+}
+
+class _FrostControlsState extends State<_FrostControls> {
+  late double _blur = widget.settings.frostBlur;
+  late double _opacity = widget.settings.frostOpacity;
+
+  Future<void> _save() {
+    return context.read<AppListCacher>().updateSettings(
+          widget.settings
+              .copyWith(frostBlur: _blur, frostOpacity: _opacity),
+        );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Blur: ${_blur.round()} px'),
+          Slider(
+            value: _blur,
+            min: 0,
+            max: 30,
+            divisions: 30,
+            label: '${_blur.round()} px',
+            onChanged: (value) => setState(() => _blur = value),
+            onChangeEnd: (_) => _save(),
+          ),
+          Text('Opacity: ${(_opacity * 100).round()}%'),
+          Slider(
+            value: _opacity,
+            min: 0.05,
+            max: 0.9,
+            divisions: 17,
+            label: '${(_opacity * 100).round()}%',
+            onChanged: (value) => setState(() => _opacity = value),
+            onChangeEnd: (_) => _save(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _IconBackgroundControls extends StatefulWidget {
+  const _IconBackgroundControls({required this.settings});
+
+  final LauncherSettings settings;
+
+  @override
+  State<_IconBackgroundControls> createState() =>
+      _IconBackgroundControlsState();
+}
+
+class _IconBackgroundControlsState extends State<_IconBackgroundControls> {
+  late double _radius = widget.settings.iconBackgroundRadius;
+  late double _padding = widget.settings.iconBackgroundPadding;
+
+  Future<void> _save() {
+    return context.read<AppListCacher>().updateSettings(
+          widget.settings.copyWith(
+            iconBackgroundRadius: _radius,
+            iconBackgroundPadding: _padding,
+          ),
+        );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Icon background corner radius: ${_radius.round()} px'),
+          Slider(
+            value: _radius,
+            min: 0,
+            max: 32,
+            divisions: 32,
+            label: '${_radius.round()} px',
+            onChanged: (value) => setState(() => _radius = value),
+            onChangeEnd: (_) => _save(),
+          ),
+          Text('Space around each icon: ${_padding.round()} px'),
+          Slider(
+            value: _padding,
+            min: 0,
+            max: 24,
+            divisions: 24,
+            label: '${_padding.round()} px',
+            onChanged: (value) => setState(() => _padding = value),
+            onChangeEnd: (_) => _save(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Future<void> _showThemeModeDialog(BuildContext context) async {
+  final appList = context.read<AppListCacher>();
+  final mode = await showDialog<ThemeMode>(
+    context: context,
+    builder: (context) => SimpleDialog(
+      title: const Text('Theme mode'),
+      children: [
+        RadioGroup<ThemeMode>(
+          groupValue: appList.settings.themeMode,
+          onChanged: (value) => Navigator.pop(context, value),
+          child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<ThemeMode>(
+                value: ThemeMode.system,
+                title: Text('System'),
+              ),
+              RadioListTile<ThemeMode>(
+                value: ThemeMode.light,
+                title: Text('Light'),
+              ),
+              RadioListTile<ThemeMode>(
+                value: ThemeMode.dark,
+                title: Text('Dark'),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+  if (mode != null) {
+    await appList.updateSettings(appList.settings.copyWith(themeMode: mode));
+  }
+}
+
+Future<void> _showWallpaperDialog(BuildContext context) async {
+  final appList = context.read<AppListCacher>();
+  final action = await showDialog<WallpaperAction>(
+    context: context,
+    builder: (context) => SimpleDialog(
+      title: const Text('Wallpaper'),
+      children: [
+        _WallpaperOption(
+          label: 'Pick light wallpaper',
+          previewPath: appList.settings.lightWallpaperPath ??
+              appList.settings.darkWallpaperPath,
+          onPressed: () => Navigator.pop(context, WallpaperAction.pickLight),
+        ),
+        _WallpaperOption(
+          label: 'Pick dark wallpaper',
+          previewPath: appList.settings.darkWallpaperPath ??
+              appList.settings.lightWallpaperPath,
+          onPressed: () => Navigator.pop(context, WallpaperAction.pickDark),
+        ),
+        SimpleDialogOption(
+          onPressed: () => Navigator.pop(context, WallpaperAction.clearLight),
+          child: const Text('Clear light wallpaper'),
+        ),
+        SimpleDialogOption(
+          onPressed: () => Navigator.pop(context, WallpaperAction.clearDark),
+          child: const Text('Clear dark wallpaper'),
+        ),
+        SimpleDialogOption(
+          onPressed: () => Navigator.pop(context, WallpaperAction.clearBoth),
+          child: const Text('Clear all wallpapers'),
+        ),
+      ],
+    ),
+  );
+
+  if (!context.mounted) {
+    return;
+  }
+
+  switch (action) {
+    case WallpaperAction.pickLight:
+      final path = await LauncherBridge.pickFile(mimeType: 'image/*');
+      if (path != null) {
+        await appList.updateSettings(
+          appList.settings.copyWith(lightWallpaperPath: path),
+        );
+      }
+    case WallpaperAction.pickDark:
+      final path = await LauncherBridge.pickFile(mimeType: 'image/*');
+      if (path != null) {
+        await appList.updateSettings(
+          appList.settings.copyWith(darkWallpaperPath: path),
+        );
+      }
+    case WallpaperAction.clearLight:
+      await appList.updateSettings(
+        appList.settings.copyWith(clearLightWallpaper: true),
+      );
+    case WallpaperAction.clearDark:
+      await appList.updateSettings(
+        appList.settings.copyWith(clearDarkWallpaper: true),
+      );
+    case WallpaperAction.clearBoth:
+      await appList.updateSettings(
+        appList.settings.copyWith(
+          clearLightWallpaper: true,
+          clearDarkWallpaper: true,
+        ),
+      );
+    case null:
+  }
+}
+
+class _WallpaperOption extends StatelessWidget {
+  const _WallpaperOption({
+    required this.label,
+    required this.previewPath,
+    required this.onPressed,
+  });
+
+  final String label;
+  final String? previewPath;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SimpleDialogOption(
+      onPressed: onPressed,
+      child: Row(
+        children: [
+          Expanded(child: Text(label)),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 88,
+            height: 48,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: previewPath == null
+                  ? ColoredBox(
+                      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                      child: const Center(child: Text('Default')),
+                    )
+                  : Image.file(
+                      File(previewPath!),
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => ColoredBox(
+                        color:
+                            Theme.of(context).colorScheme.surfaceContainerHigh,
+                        child: const Center(child: Icon(Icons.broken_image)),
+                      ),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Future<void> _showGridItemActions(BuildContext context, int index) async {
+  final appList = context.read<AppListCacher>();
+  final item = appList.data!.grid[index];
+  final entry = appList.entryFor(item);
+  if (entry == null) {
+    return;
+  }
+
+  final action = await showDialog<GridIconAction>(
+    context: context,
+    builder: (context) => SimpleDialog(
+      title: _entryDialogTitle(entry),
+      children: [
+        SimpleDialogOption(
+          onPressed: () => Navigator.pop(context, GridIconAction.selectIcon),
+          child: const Text('Select icon'),
+        ),
+        SimpleDialogOption(
+          onPressed: () =>
+              Navigator.pop(context, GridIconAction.openAppSettings),
+          child: const Text('Open app settings'),
+        ),
+        SimpleDialogOption(
+          onPressed: () => Navigator.pop(context, GridIconAction.remove),
+          child: const Text('Remove from home'),
+        ),
+        SimpleDialogOption(
+          onPressed: () => Navigator.pop(context, GridIconAction.deleteApp),
+          child: const Text('Uninstall app'),
+        ),
+      ],
+    ),
+  );
+
+  if (!context.mounted) {
+    return;
+  }
+
+  switch (action) {
+    case GridIconAction.selectIcon:
+      await _selectGridIcon(context, index);
+    case GridIconAction.openAppSettings:
+      await LauncherBridge.openAppSettings(entry.packageName);
+    case GridIconAction.remove:
+      await appList.removeFromGrid(item.entryId);
+    case GridIconAction.deleteApp:
+      await LauncherBridge.uninstallPackage(entry.packageName);
+    case null:
+  }
+}
+
+Future<void> _showEntryActions(
+    BuildContext context, LauncherEntry entry) async {
+  final appList = context.read<AppListCacher>();
+  final action = await showDialog<AppAction>(
+    context: context,
+    builder: (context) => SimpleDialog(
+      title: _entryDialogTitle(entry),
+      children: [
+        SimpleDialogOption(
+          onPressed: () => Navigator.pop(context, AppAction.addToGrid),
+          child: const Text('Add to home'),
+        ),
+        SimpleDialogOption(
+          onPressed: () => Navigator.pop(context, AppAction.openAppSettings),
+          child: const Text('Open app settings'),
+        ),
+        SimpleDialogOption(
+          onPressed: () => Navigator.pop(context, AppAction.deleteApp),
+          child: const Text('Uninstall app'),
+        ),
+      ],
+    ),
+  );
+
+  switch (action) {
+    case AppAction.addToGrid:
+      await appList.addToGrid(entry);
+    case AppAction.openAppSettings:
+      await LauncherBridge.openAppSettings(entry.packageName);
+    case AppAction.deleteApp:
+      await LauncherBridge.uninstallPackage(entry.packageName);
+    case null:
+  }
+}
+
+Widget _entryDialogTitle(LauncherEntry entry) {
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(entry.title),
+      const SizedBox(height: 8),
+      Text(entry.packageName, style: const TextStyle(fontSize: 13)),
+      Text(
+        'Version ${entry.versionName ?? 'Unknown'}',
+        style: const TextStyle(fontSize: 13),
+      ),
+    ],
+  );
+}
+
+Future<void> _selectGridIcon(BuildContext context, int index) async {
+  final appList = context.read<AppListCacher>();
+  final item = appList.data!.grid[index];
+  final selected = await _pickIcon(context, item.icon);
+  if (selected != null) {
+    item.icon = selected;
+    item.iconSlug = null;
+    await appList.flushChanges();
+  }
+}
+
+Future<Map<String, dynamic>?> _pickIcon(
+  BuildContext context,
+  Map<String, dynamic>? currentIcon,
+) async {
+  final selected = await showIconSearchPicker(
+    context,
+    selected: currentIcon == null ? null : iconFromJson(currentIcon),
+  );
+  return selected?.toJson();
+}
+
+IconData _iconForGridItem(GridApp item, LauncherEntry entry) {
+  if (item.icon != null) {
+    final icon = iconFromJson(item.icon!);
+    if (icon != null) {
+      return icon.data;
+    }
+  }
+  if (item.iconSlug != null && icons[item.iconSlug] != null) {
+    return icons[item.iconSlug]!;
+  }
+  return _defaultIconForEntry(entry);
+}
+
+IconData _defaultIconForEntry(LauncherEntry entry) {
+  return entry.type == LauncherEntryType.shortcut
+      ? Icons.open_in_new
+      : Icons.apps;
+}
+
+Future<void> _openEntry(BuildContext context, LauncherEntry entry) async {
+  try {
+    await LauncherBridge.openEntry(entry.toJson());
+  } catch (error) {
+    if (!context.mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Could not open ${entry.title}')),
+    );
+  }
+}
+
+enum GlobalAction {
+  setupHome,
+  launcherSettings,
+  refreshApps,
+  exportGridJson,
+  importGridJson,
+}
+
+enum WallpaperAction {
+  pickLight,
+  pickDark,
+  clearLight,
+  clearDark,
+  clearBoth,
+}
+
+enum GridIconAction { selectIcon, openAppSettings, remove, deleteApp }
+
+enum AppAction { addToGrid, openAppSettings, deleteApp }
