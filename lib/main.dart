@@ -68,11 +68,7 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void initState() {
     super.initState();
-    LauncherBridge.setHomePressedHandler(() async {
-      if (filterSearch != null) {
-        _clearSearch();
-      }
-    });
+    LauncherBridge.setHomePressedHandler(_returnToGrid);
   }
 
   @override
@@ -88,6 +84,23 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       filterSearch = null;
     });
+  }
+
+  /// Android routes every Home press to this activity, including when one of
+  /// its modal routes is visible. Treat that action as a reset, rather than a
+  /// normal back action: dismiss every overlay and leave only the home grid.
+  Future<void> _returnToGrid() async {
+    if (!mounted) {
+      return;
+    }
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    ScaffoldMessenger.maybeOf(context)?.clearSnackBars();
+    Navigator.of(context, rootNavigator: true)
+        .popUntil((route) => route.isFirst);
+    if (filterSearch != null) {
+      _clearSearch();
+    }
   }
 
   @override
@@ -1111,6 +1124,7 @@ Future<void> _showWallpaperDialog(BuildContext context) async {
 }
 
 Future<WallpaperAppearance?> _pickAndEditWallpaper(BuildContext context) async {
+  final rootNavigator = Navigator.of(context, rootNavigator: true);
   showDialog<void>(
     context: context,
     useRootNavigator: true,
@@ -1138,8 +1152,10 @@ Future<WallpaperAppearance?> _pickAndEditWallpaper(BuildContext context) async {
   try {
     path = await LauncherBridge.pickFile(mimeType: 'image/*');
   } finally {
-    if (context.mounted) {
-      Navigator.of(context, rootNavigator: true).pop();
+    // Home can dismiss this dialog while the native picker is open. Never pop
+    // the only remaining route when its delayed result arrives afterward.
+    if (context.mounted && rootNavigator.canPop()) {
+      rootNavigator.pop();
     }
   }
   if (!context.mounted || path == null) {
