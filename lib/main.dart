@@ -36,6 +36,14 @@ class MyApp extends StatelessWidget {
       builder: (context, appList, child) {
         return MaterialApp(
           title: 'Nkit Launcher',
+          // Keep every route above Android's system bars. In particular,
+          // ModalBottomSheet's `useSafeArea` deliberately does not inset its
+          // bottom edge, so protecting the navigator is more reliable than
+          // adding bottom padding to each screen or control.
+          builder: (context, child) => SafeArea(
+            maintainBottomViewPadding: true,
+            child: child ?? const SizedBox.shrink(),
+          ),
           themeMode: appList.settings.themeMode,
           theme: _defaultLightTheme.copyWith(
             colorScheme: _defaultLightTheme.colorScheme.copyWith(
