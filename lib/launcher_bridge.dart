@@ -6,6 +6,21 @@ class LauncherBridge {
   static const EventChannel _events =
       EventChannel('nkit_launcher/apps_changed');
 
+  static Future<void> Function()? _onHomePressed;
+
+  /// Registers the callback invoked when Android routes a Home-button press to
+  /// this launcher activity.
+  static void setHomePressedHandler(Future<void> Function()? handler) {
+    _onHomePressed = handler;
+    _methods.setMethodCallHandler(handler == null ? null : handleMethodCall);
+  }
+
+  static Future<void> handleMethodCall(MethodCall call) async {
+    if (call.method == 'homePressed') {
+      await _onHomePressed?.call();
+    }
+  }
+
   static Future<List<Map<String, dynamic>>> getLauncherEntries() async {
     final result = await _methods.invokeListMethod<dynamic>('getEntries');
     return (result ?? const [])

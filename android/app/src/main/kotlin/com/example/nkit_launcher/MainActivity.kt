@@ -30,6 +30,7 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     private val methodChannelName = "nkit_launcher/launcher"
     private val eventChannelName = "nkit_launcher/apps_changed"
+    private lateinit var methodChannel: MethodChannel
     private var pendingFileResult: MethodChannel.Result? = null
     private var pendingSaveContent: String? = null
     private var pendingFileMimeType: String? = null
@@ -37,10 +38,11 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        MethodChannel(
+        methodChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             methodChannelName
-        ).setMethodCallHandler { call, result ->
+        )
+        methodChannel.setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
                     "getEntries" -> result.success(getLauncherEntries())
@@ -91,6 +93,13 @@ class MainActivity : FlutterActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             eventChannelName
         ).setStreamHandler(AppChangeStreamHandler(this))
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_HOME)) {
+            methodChannel.invokeMethod("homePressed", null)
+        }
     }
 
     private fun getLauncherEntries(): List<Map<String, Any?>> {

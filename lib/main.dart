@@ -12,6 +12,12 @@ import 'icon_picker/catalog.dart';
 import 'icon_picker/picker.dart';
 import 'launcher_bridge.dart';
 
+const _lightSurface = Color(0xFFFFFCF5);
+final _defaultLightTheme = ThemeData(
+  brightness: Brightness.light,
+  useMaterial3: true,
+);
+
 void main() {
   runApp(
     ChangeNotifierProvider(
@@ -31,9 +37,11 @@ class MyApp extends StatelessWidget {
         return MaterialApp(
           title: 'Nkit Launcher',
           themeMode: appList.settings.themeMode,
-          theme: ThemeData(
-            brightness: Brightness.light,
-            useMaterial3: true,
+          theme: _defaultLightTheme.copyWith(
+            colorScheme: _defaultLightTheme.colorScheme.copyWith(
+              surface: _lightSurface,
+            ),
+            scaffoldBackgroundColor: _lightSurface,
           ),
           darkTheme: ThemeData(
             brightness: Brightness.dark,
@@ -58,7 +66,18 @@ class _MyHomePageState extends State<MyHomePage> {
   String? filterSearch;
 
   @override
+  void initState() {
+    super.initState();
+    LauncherBridge.setHomePressedHandler(() async {
+      if (filterSearch != null) {
+        _clearSearch();
+      }
+    });
+  }
+
+  @override
   void dispose() {
+    LauncherBridge.setHomePressedHandler(null);
     textController.dispose();
     super.dispose();
   }
@@ -1175,6 +1194,7 @@ class _WallpaperEditorState extends State<_WallpaperEditor> {
   @override
   Widget build(BuildContext context) {
     final previewHeight = MediaQuery.sizeOf(context).height * 0.34;
+    final bottomSafeArea = MediaQuery.paddingOf(context).bottom;
     return Material(
       child: Column(
         children: [
@@ -1249,7 +1269,7 @@ class _WallpaperEditorState extends State<_WallpaperEditor> {
           ),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
+              padding: EdgeInsets.fromLTRB(24, 16, 24, 8 + bottomSafeArea),
               children: [
                 Text('Crop zoom: ${_cropScale.toStringAsFixed(1)}×'),
                 Slider(

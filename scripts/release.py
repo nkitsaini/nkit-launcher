@@ -85,9 +85,22 @@ def choose_increment_interactively(current_version: str) -> str:
     choices = ("patch", "minor", "major")
     print(f"Current version: {current_version}")
     print("Choose the release increment:")
-    for increment in choices:
-        version = increment_version(current_version, increment)
-        print(f"  {increment_summary(increment, current_version, version)}")
+    summaries = [
+        increment_summary(increment, current_version, increment_version(current_version, increment))
+        for increment in choices
+    ]
+
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        try:
+            import termios
+            import tty
+        except ImportError:
+            pass
+        else:
+            return choose_increment_with_arrows(choices, summaries, termios, tty)
+
+    for summary in summaries:
+        print(f"  {summary}")
 
     while True:
         try:
@@ -98,6 +111,52 @@ def choose_increment_interactively(current_version: str) -> str:
         if choice in choices:
             return choice
         print("Please enter patch, minor, or major.", file=sys.stderr)
+
+
+def choose_increment_with_arrows(
+    choices: tuple[str, ...], summaries: list[str], termios: object, tty: object
+) -> str:
+    """Select a release increment with arrow keys in an ANSI-capable terminal."""
+    selected = 0
+    stdin = sys.stdin
+    stdout = sys.stdout
+    file_descriptor = stdin.fileno()
+    previous_terminal_settings = termios.tcgetattr(file_descriptor)
+
+    def render() -> None:
+        for index, summary in enumerate(summaries):
+            marker = "❯" if index == selected else " "
+            stdout.write(f"\r\033[2K{marker} {summary}\n")
+        stdout.flush()
+
+    print("Use ↑/↓ to choose, then Enter to continue.")
+    stdout.write("\033[?25l")
+    render()
+    try:
+        tty.setraw(file_descriptor)
+        while True:
+            key = stdin.read(1)
+            if key in ("\r", "\n"):
+                return choices[selected]
+            if key == "\x03":
+                raise KeyboardInterrupt
+            if key != "\x1b":
+                continue
+            if stdin.read(1) != "[":
+                continue
+            direction = stdin.read(1)
+            if direction == "A":
+                selected = (selected - 1) % len(choices)
+            elif direction == "B":
+                selected = (selected + 1) % len(choices)
+            else:
+                continue
+            stdout.write(f"\033[{len(choices)}F")
+            render()
+    finally:
+        termios.tcsetattr(file_descriptor, termios.TCSADRAIN, previous_terminal_settings)
+        stdout.write("\033[?25h\n")
+        stdout.flush()
 
 
 def set_version(version: str) -> None:

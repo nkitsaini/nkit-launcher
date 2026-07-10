@@ -15,7 +15,8 @@ then creates and pushes the annotated `v0.0.5` tag. Pushing the tag starts the
 APK release workflow. Pass an explicit version (for example `0.0.5`) when
 needed, or use `--patch`, `--minor`, or `--major` to calculate it from the
 current version. With no version or increment flag, the script interactively
-shows all three resulting versions and asks which increment to use. Use
+shows all three resulting versions and asks which increment to use; use the
+up/down arrow keys and Enter in a terminal. Use
 `--dry-run` to validate the release inputs first.
 
 ## Getting Started
