@@ -149,11 +149,13 @@ class _MyHomePageState extends State<MyHomePage> {
             children: [
               ColoredBox(color: Theme.of(context).colorScheme.surface),
               if (wallpaperPath != null)
-                Image.file(
-                  File(wallpaperPath),
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) =>
-                      const SizedBox.shrink(),
+                RepaintBoundary(
+                  child: Image.file(
+                    File(wallpaperPath),
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) =>
+                        const SizedBox.shrink(),
+                  ),
                 ),
               if (wallpaperPath != null)
                 ColoredBox(
@@ -180,16 +182,22 @@ class IconAppGridWidget extends StatelessWidget {
           return const Row(children: []);
         }
 
-        final children = <Widget>[];
+        final grid = appList.data!.grid;
         const iconSize = 48.0;
-        for (final (index, item) in appList.data!.grid.indexed) {
-          final entry = appList.entryFor(item);
-          if (entry == null) {
-            continue;
-          }
-          final icon = _gridIcon(item, entry, size: iconSize);
-          children.add(
-            GestureDetector(
+        return GridView.builder(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            childAspectRatio: 1.5,
+            crossAxisCount: appList.settings.homeColumns,
+          ),
+          itemCount: grid.length,
+          itemBuilder: (context, index) {
+            final item = grid[index];
+            final entry = appList.entryFor(item);
+            if (entry == null) {
+              return const SizedBox.shrink();
+            }
+            final icon = _gridIcon(item, entry, size: iconSize);
+            return GestureDetector(
               onLongPress: () => _showGridItemActions(context, index),
               // Keep a comfortably large touch target, but constrain the
               // visible frost to the icon and its configured breathing room.
@@ -202,13 +210,8 @@ class IconAppGridWidget extends StatelessWidget {
                 constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                 onPressed: () => _openEntry(context, entry),
               ),
-            ),
-          );
-        }
-        return GridView.count(
-          childAspectRatio: 1.5,
-          crossAxisCount: appList.settings.homeColumns,
-          children: children,
+            );
+          },
         );
       },
     );
@@ -776,7 +779,8 @@ class _LauncherSettingsSheet extends StatelessWidget {
               const ListTile(
                 leading: Icon(Icons.blur_on),
                 title: Text('Frost effect'),
-                subtitle: Text('Used by search, the search bar, and icon tiles'),
+                subtitle:
+                    Text('Used by search, the search bar, and icon tiles'),
               ),
               _FrostControls(settings: settings),
               SwitchListTile(
@@ -822,8 +826,7 @@ class _FrostControlsState extends State<_FrostControls> {
 
   Future<void> _save() {
     return context.read<AppListCacher>().updateSettings(
-          widget.settings
-              .copyWith(frostBlur: _blur, frostOpacity: _opacity),
+          widget.settings.copyWith(frostBlur: _blur, frostOpacity: _opacity),
         );
   }
 
@@ -993,14 +996,14 @@ Future<void> _showWallpaperDialog(BuildContext context) async {
 
   switch (action) {
     case WallpaperAction.pickLight:
-      final path = await LauncherBridge.pickFile(mimeType: 'image/*');
+      final path = await _pickWallpaperWithFeedback(context);
       if (path != null) {
         await appList.updateSettings(
           appList.settings.copyWith(lightWallpaperPath: path),
         );
       }
     case WallpaperAction.pickDark:
-      final path = await LauncherBridge.pickFile(mimeType: 'image/*');
+      final path = await _pickWallpaperWithFeedback(context);
       if (path != null) {
         await appList.updateSettings(
           appList.settings.copyWith(darkWallpaperPath: path),
@@ -1022,6 +1025,41 @@ Future<void> _showWallpaperDialog(BuildContext context) async {
         ),
       );
     case null:
+  }
+}
+
+/// The Android picker returns only after it has resized and stored the image.
+/// Keep feedback visible for that otherwise silent part of the flow.
+Future<String?> _pickWallpaperWithFeedback(BuildContext context) async {
+  showDialog<void>(
+    context: context,
+    useRootNavigator: true,
+    barrierDismissible: false,
+    builder: (context) => const PopScope(
+      canPop: false,
+      child: AlertDialog(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 3),
+            ),
+            SizedBox(width: 20),
+            Expanded(child: Text('Preparing wallpaper…')),
+          ],
+        ),
+      ),
+    ),
+  );
+  // Ensure the overlay has been painted before the system picker takes over.
+  await WidgetsBinding.instance.endOfFrame;
+  try {
+    return await LauncherBridge.pickFile(mimeType: 'image/*');
+  } finally {
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
   }
 }
 

@@ -281,17 +281,30 @@ class MainActivity : FlutterActivity() {
             return
         }
 
-        try {
-            val uri = data.data!!
-            val file = if (mimeType?.startsWith("image/") == true) {
-                prepareWallpaper(uri)
-            } else {
-                copyPickedFile(uri)
+        val uri = data.data!!
+        if (mimeType?.startsWith("image/") != true) {
+            try {
+                val file = copyPickedFile(uri)
+                result.success(file.absolutePath)
+            } catch (error: Exception) {
+                result.error("pick_file_failed", error.message, null)
             }
-            result.success(file.absolutePath)
-        } catch (error: Exception) {
-            result.error("pick_file_failed", error.message, null)
+            return
         }
+
+        // Bitmap decoding and PNG compression can take several seconds. Do it
+        // away from the Android UI thread so Flutter can keep its progress UI
+        // responsive until the result is delivered on the main thread.
+        Thread {
+            try {
+                val file = prepareWallpaper(uri)
+                runOnUiThread { result.success(file.absolutePath) }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    result.error("pick_file_failed", error.message, null)
+                }
+            }
+        }.start()
     }
 
     private fun copyPickedFile(uri: Uri): File {
@@ -305,9 +318,8 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
-     * Stores a lossless PNG sized just large enough for BoxFit.cover on this
-     * display. This avoids repeatedly decoding a multi-megapixel source while
-     * retaining every pixel that can be visible on screen.
+     * Stores a lossless PNG of the centred BoxFit.cover crop at display size.
+     * This avoids repeatedly decoding pixels that Flutter would crop away.
      */
     private fun prepareWallpaper(uri: Uri): File {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -339,13 +351,50 @@ class MainActivity : FlutterActivity() {
         val decoded = contentResolver.openInputStream(uri).use { input ->
             BitmapFactory.decodeStream(input, null, decodeOptions)
         } ?: return copyPickedFile(uri)
-        val resized = if (decoded.width == targetWidth && decoded.height == targetHeight) {
+        val displayWidth = display.widthPixels.coerceAtLeast(1)
+        val displayHeight = display.heightPixels.coerceAtLeast(1)
+        val displayAspect = displayWidth.toFloat() / displayHeight
+        val decodedAspect = decoded.width.toFloat() / decoded.height
+        val cropWidth: Int
+        val cropHeight: Int
+        val cropLeft: Int
+        val cropTop: Int
+        if (decodedAspect > displayAspect) {
+            cropHeight = decoded.height
+            cropWidth = (cropHeight * displayAspect).toInt().coerceAtLeast(1)
+            cropLeft = (decoded.width - cropWidth) / 2
+            cropTop = 0
+        } else {
+            cropWidth = decoded.width
+            cropHeight = (cropWidth / displayAspect).toInt().coerceAtLeast(1)
+            cropLeft = 0
+            cropTop = (decoded.height - cropHeight) / 2
+        }
+        val cropped = if (
+            cropWidth == decoded.width && cropHeight == decoded.height
+        ) {
             decoded
         } else {
-            Bitmap.createScaledBitmap(decoded, targetWidth, targetHeight, true)
+            Bitmap.createBitmap(decoded, cropLeft, cropTop, cropWidth, cropHeight)
         }
-        if (resized !== decoded) {
+        if (cropped !== decoded) {
             decoded.recycle()
+        }
+        val outputScale = minOf(
+            displayWidth.toFloat() / cropped.width,
+            displayHeight.toFloat() / cropped.height
+        ).coerceAtMost(1f)
+        val outputWidth = (cropped.width * outputScale).toInt().coerceAtLeast(1)
+        val outputHeight = (cropped.height * outputScale).toInt().coerceAtLeast(1)
+        val resized = if (
+            cropped.width == outputWidth && cropped.height == outputHeight
+        ) {
+            cropped
+        } else {
+            Bitmap.createScaledBitmap(cropped, outputWidth, outputHeight, true)
+        }
+        if (resized !== cropped) {
+            cropped.recycle()
         }
         val wallpaperDirectory = File(filesDir, "wallpapers").apply { mkdirs() }
         val wallpaper = File(wallpaperDirectory, "wallpaper_${System.currentTimeMillis()}.png")
