@@ -56,6 +56,50 @@ def read_current_version() -> str:
     return match.group(1)
 
 
+def increment_version(version: str, increment: str) -> str:
+    """Return the next semantic version for the requested release increment."""
+    if not VERSION_PATTERN.fullmatch(version):
+        fail(f"current pubspec version {version!r} is not a valid semantic version")
+
+    core_version = version.split("-", maxsplit=1)[0].split("+", maxsplit=1)[0]
+    major, minor, patch = (int(part) for part in core_version.split("."))
+    if increment == "major":
+        return f"{major + 1}.0.0"
+    if increment == "minor":
+        return f"{major}.{minor + 1}.0"
+    if increment == "patch":
+        return f"{major}.{minor}.{patch + 1}"
+    raise ValueError(f"unsupported increment: {increment}")
+
+
+def increment_summary(increment: str, current: str, version: str) -> str:
+    details = {
+        "patch": "increments the patch number",
+        "minor": "increments the minor number and resets patch to 0",
+        "major": "increments the major number and resets minor and patch to 0",
+    }
+    return f"{increment}: {current} → {version} ({details[increment]})"
+
+
+def choose_increment_interactively(current_version: str) -> str:
+    choices = ("patch", "minor", "major")
+    print(f"Current version: {current_version}")
+    print("Choose the release increment:")
+    for increment in choices:
+        version = increment_version(current_version, increment)
+        print(f"  {increment_summary(increment, current_version, version)}")
+
+    while True:
+        try:
+            choice = input("Increment [patch/minor/major] (default: patch): ").strip().lower()
+        except EOFError:
+            fail("no interactive input; specify a version or --patch, --minor, or --major")
+        choice = choice or "patch"
+        if choice in choices:
+            return choice
+        print("Please enter patch, minor, or major.", file=sys.stderr)
+
+
 def set_version(version: str) -> None:
     source = PUBSPEC.read_text()
     updated, replacements = PUBSPEC_VERSION_PATTERN.subn(
@@ -85,7 +129,21 @@ def main() -> None:
     )
     parser.add_argument(
         "version",
+        nargs="?",
         help="Flutter version in pubspec format, for example 1.2.3 or 1.2.3+4",
+    )
+    increments = parser.add_mutually_exclusive_group()
+    increments.add_argument(
+        "--patch", dest="increment", action="store_const", const="patch",
+        help="Increment the patch version",
+    )
+    increments.add_argument(
+        "--minor", dest="increment", action="store_const", const="minor",
+        help="Increment the minor version and reset patch to 0",
+    )
+    increments.add_argument(
+        "--major", dest="increment", action="store_const", const="major",
+        help="Increment the major version and reset minor and patch to 0",
     )
     parser.add_argument(
         "--remote", default="origin", help="Git remote to push to (default: origin)"
@@ -95,13 +153,21 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    version = args.version.removeprefix("v")
-    if not VERSION_PATTERN.fullmatch(version):
-        fail("version must be MAJOR.MINOR.PATCH, optionally with prerelease or +BUILD")
+    if args.version is not None and args.increment is not None:
+        parser.error("version cannot be used with --patch, --minor, or --major")
 
     branch = current_branch()
     ensure_clean_worktree()
     current_version = read_current_version()
+    if args.version is not None:
+        version = args.version.removeprefix("v")
+        if not VERSION_PATTERN.fullmatch(version):
+            fail(
+                "version must be MAJOR.MINOR.PATCH, optionally with prerelease or +BUILD"
+            )
+    else:
+        increment = args.increment or choose_increment_interactively(current_version)
+        version = increment_version(current_version, increment)
     if version == current_version:
         fail(f"pubspec.yaml already has version {version}")
 
