@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'fuzzy_search.dart';
 import 'launcher_bridge.dart';
 
 enum LauncherEntryType { activity, shortcut }
@@ -144,12 +145,26 @@ class LauncherEntry {
   }
 
   bool matches(String filter) {
-    final needle = filter.trim().toLowerCase();
-    if (needle.isEmpty) {
-      return true;
+    return searchMatch(filter) != null;
+  }
+
+  LauncherEntrySearchMatch? searchMatch(String query) {
+    final titleMatch = FuzzySearch.match(query, title);
+    final packageMatch = FuzzySearch.match(query, packageName);
+    if (titleMatch == null && packageMatch == null) {
+      return null;
     }
-    return title.toLowerCase().contains(needle) ||
-        packageName.toLowerCase().contains(needle);
+
+    // A title is what people see and type first. Keep a title hit ahead of a
+    // package-only hit, but still allow package names to discover an app.
+    final score = (titleMatch?.score ?? packageMatch!.score) +
+        (titleMatch == null ? 0 : 1000);
+    return LauncherEntrySearchMatch(
+      entry: this,
+      score: score,
+      titleMatch: titleMatch,
+      packageMatch: packageMatch,
+    );
   }
 
   Map<String, dynamic> toJson() {
@@ -165,6 +180,20 @@ class LauncherEntry {
       'searchableByDefault': searchableByDefault,
     };
   }
+}
+
+class LauncherEntrySearchMatch {
+  const LauncherEntrySearchMatch({
+    required this.entry,
+    required this.score,
+    this.titleMatch,
+    this.packageMatch,
+  });
+
+  final LauncherEntry entry;
+  final int score;
+  final FuzzyMatch? titleMatch;
+  final FuzzyMatch? packageMatch;
 }
 
 class WallpaperAppearance {
@@ -559,6 +588,21 @@ class AppListCacher extends ChangeNotifier {
               entry.searchableByDefault || homeEntryIds.contains(entry.id),
         )
         .toList(growable: false);
+  }
+
+  List<LauncherEntrySearchMatch> searchEntries(String query) {
+    final matches = searchableEntries()
+        .map((entry) => entry.searchMatch(query))
+        .whereType<LauncherEntrySearchMatch>()
+        .toList();
+    matches.sort((a, b) {
+      final scoreComparison = b.score.compareTo(a.score);
+      if (scoreComparison != 0) {
+        return scoreComparison;
+      }
+      return a.entry.title.toLowerCase().compareTo(b.entry.title.toLowerCase());
+    });
+    return matches;
   }
 
   void _migrateLegacyGridIds() {

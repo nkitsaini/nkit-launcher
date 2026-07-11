@@ -36,14 +36,6 @@ class MyApp extends StatelessWidget {
       builder: (context, appList, child) {
         return MaterialApp(
           title: 'Nkit Launcher',
-          // Keep every route above Android's system bars. In particular,
-          // ModalBottomSheet's `useSafeArea` deliberately does not inset its
-          // bottom edge, so protecting the navigator is more reliable than
-          // adding bottom padding to each screen or control.
-          builder: (context, child) => SafeArea(
-            maintainBottomViewPadding: true,
-            child: child ?? const SizedBox.shrink(),
-          ),
           themeMode: appList.settings.themeMode,
           theme: _defaultLightTheme.copyWith(
             colorScheme: _defaultLightTheme.colorScheme.copyWith(
@@ -119,6 +111,12 @@ class _MyHomePageState extends State<MyHomePage> {
       builder: (context, appList, child) {
         final wallpaper = appList.settings.wallpaperFor(brightness);
         final keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+        final navigationInset = MediaQuery.viewPaddingOf(context).bottom;
+        // The foreground already reserves navigationInset through SafeArea.
+        // Move it only by the keyboard height that remains above that space.
+        final keyboardOffset = (keyboardInset - navigationInset)
+            .clamp(0.0, double.infinity)
+            .toDouble();
         final children = <Widget>[];
         if (filterSearch == null) {
           children.add(const Expanded(child: IconAppGridWidget()));
@@ -169,16 +167,13 @@ class _MyHomePageState extends State<MyHomePage> {
         );
         children.add(
           Padding(
-            padding: EdgeInsets.only(bottom: keyboardInset),
-            child: SafeArea(
-              top: false,
-              child: wallpaper == null
-                  ? searchRow
-                  : _FrostedSurface(
-                      settings: appList.settings,
-                      child: searchRow,
-                    ),
-            ),
+            padding: EdgeInsets.only(bottom: keyboardOffset),
+            child: wallpaper == null
+                ? searchRow
+                : _FrostedSurface(
+                    settings: appList.settings,
+                    child: searchRow,
+                  ),
           ),
         );
 
@@ -194,6 +189,9 @@ class _MyHomePageState extends State<MyHomePage> {
             body: Stack(
               fit: StackFit.expand,
               children: [
+                // This background layer intentionally stays outside the
+                // keyboard-responsive safe area, so opening the keyboard
+                // cannot change the wallpaper's crop or position.
                 ColoredBox(color: Theme.of(context).colorScheme.surface),
                 if (wallpaper != null)
                   RepaintBoundary(child: _WallpaperImage(wallpaper: wallpaper)),
@@ -202,7 +200,14 @@ class _MyHomePageState extends State<MyHomePage> {
                     color: Theme.of(context).colorScheme.surface.withValues(
                         alpha: brightness == Brightness.dark ? 0.32 : 0.18),
                   ),
-                BackdropGroup(child: Column(children: children)),
+                BackdropGroup(
+                  child: SafeArea(
+                    // Keep foreground controls clear of the navigation bar
+                    // even while the keyboard changes MediaQuery.padding.
+                    maintainBottomViewPadding: true,
+                    child: Column(children: children),
+                  ),
+                ),
               ],
             ),
           ),
@@ -444,6 +449,38 @@ class _EntryIconState extends State<_EntryIcon> {
   }
 }
 
+class _FuzzyHighlightedText extends StatelessWidget {
+  const _FuzzyHighlightedText({
+    required this.text,
+    required this.matchedIndexes,
+    this.style,
+  });
+
+  final String text;
+  final Set<int> matchedIndexes;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final highlightedStyle = style?.copyWith(fontWeight: FontWeight.w500) ??
+        const TextStyle(fontWeight: FontWeight.w500);
+    return Text.rich(
+      TextSpan(
+        style: style,
+        children: [
+          for (var index = 0; index < text.length; index++)
+            TextSpan(
+              text: text[index],
+              style: matchedIndexes.contains(index) ? highlightedStyle : null,
+            ),
+        ],
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
 class AppListWidget extends StatelessWidget {
   const AppListWidget({
     super.key,
@@ -462,19 +499,23 @@ class AppListWidget extends StatelessWidget {
           return const Text('loading ...', style: TextStyle(fontSize: 32));
         }
 
-        final entries = appList
-            .searchableEntries()
-            .where((entry) => entry.matches(filterKey))
-            .toList();
+        final entries = appList.searchEntries(filterKey);
 
         return ListView.builder(
+          // Keep the strongest fzf-style match nearest the search field.
+          // A reversed list lays item zero out at the bottom of the screen.
           reverse: filterKey.isNotEmpty,
           itemCount: entries.length,
           itemBuilder: (context, index) {
-            final entry = entries[index];
+            final match = entries[index];
+            final entry = match.entry;
             return GestureDetector(
               child: ListTile(
-                title: Text(entry.title, style: const TextStyle(fontSize: 18)),
+                title: _FuzzyHighlightedText(
+                  text: entry.title,
+                  matchedIndexes: match.titleMatch?.matchedIndexes ?? const {},
+                  style: const TextStyle(fontSize: 18),
+                ),
               ),
               onTap: () async {
                 await _openEntry(context, entry);
@@ -628,10 +669,7 @@ class _HomeSetupSheetState extends State<_HomeSetupSheet> {
   }
 
   Widget _buildAddTab(BuildContext context, AppListCacher appList) {
-    final entries = appList
-        .searchableEntries()
-        .where((entry) => entry.matches(_filter))
-        .toList();
+    final entries = appList.searchEntries(_filter);
     return Column(
       children: [
         Padding(
@@ -650,7 +688,8 @@ class _HomeSetupSheetState extends State<_HomeSetupSheet> {
           child: ListView.builder(
             itemCount: entries.length,
             itemBuilder: (context, index) {
-              final entry = entries[index];
+              final match = entries[index];
+              final entry = match.entry;
               final isOnGrid =
                   appList.data!.grid.any((item) => item.entryId == entry.id);
               return CheckboxListTile(
@@ -660,7 +699,10 @@ class _HomeSetupSheetState extends State<_HomeSetupSheet> {
                   fallback: _defaultIconForEntry(entry),
                 ),
                 value: isOnGrid,
-                title: Text(entry.title),
+                title: _FuzzyHighlightedText(
+                  text: entry.title,
+                  matchedIndexes: match.titleMatch?.matchedIndexes ?? const {},
+                ),
                 subtitle: Text(
                   entry.type == LauncherEntryType.shortcut
                       ? 'Shortcut - ${entry.packageName}'
