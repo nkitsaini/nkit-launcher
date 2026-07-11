@@ -75,6 +75,11 @@ class LauncherEntry {
   final String? versionName;
   final LauncherEntryType type;
 
+  /// Whether this entry is available before it is added to the home grid.
+  /// Browser-created pinned shortcuts opt in so "Add to home screen" can add
+  /// a search result without changing this launcher's grid.
+  final bool searchableByDefault;
+
   LauncherEntry({
     required this.id,
     required this.title,
@@ -84,6 +89,7 @@ class LauncherEntry {
     this.shortcutId,
     this.userHash,
     this.versionName,
+    this.searchableByDefault = false,
   });
 
   factory LauncherEntry.fromNative(Map<String, dynamic> json) {
@@ -96,6 +102,9 @@ class LauncherEntry {
       userHash: json['userHash'] as int?,
       versionName: json['versionName'] as String?,
       type: _typeFromString(json['type'] as String?),
+      searchableByDefault: json['searchableByDefault'] as bool? ??
+          _typeFromString(json['type'] as String?) ==
+              LauncherEntryType.activity,
     );
   }
 
@@ -107,6 +116,7 @@ class LauncherEntry {
         title: json['appName'] as String? ?? packageName,
         packageName: packageName,
         type: LauncherEntryType.activity,
+        searchableByDefault: true,
       );
     }
 
@@ -121,6 +131,9 @@ class LauncherEntry {
       userHash: json['userHash'] as int?,
       versionName: json['versionName'] as String?,
       type: _typeFromString(json['type'] as String?),
+      searchableByDefault: json['searchableByDefault'] as bool? ??
+          _typeFromString(json['type'] as String?) ==
+              LauncherEntryType.activity,
     );
   }
 
@@ -149,6 +162,7 @@ class LauncherEntry {
       'userHash': userHash,
       'versionName': versionName,
       'type': type.name,
+      'searchableByDefault': searchableByDefault,
     };
   }
 }
@@ -383,6 +397,7 @@ class AppListCacher extends ChangeNotifier {
   StreamSubscription<void>? _appChangeSubscription;
 
   Future<void> initialize() async {
+    LauncherBridge.setEntriesChangedHandler(updateCache);
     await readSettings();
     await getAppList();
     _appChangeSubscription ??= LauncherBridge.appChanges.listen((_) {
@@ -533,15 +548,15 @@ class AppListCacher extends ChangeNotifier {
     return entries;
   }
 
-  /// Apps are always searchable. Shortcuts intentionally become searchable
-  /// only after they have been added to the home grid.
+  /// Apps are always searchable. Most shortcuts become searchable only after
+  /// they have been added to the home grid; browser-created pinned shortcuts
+  /// opt in so Android's "Add to home screen" does not alter the grid.
   List<LauncherEntry> searchableEntries() {
     final homeEntryIds = data?.grid.map((item) => item.entryId).toSet() ?? {};
     return sortedEntries()
         .where(
           (entry) =>
-              entry.type == LauncherEntryType.activity ||
-              homeEntryIds.contains(entry.id),
+              entry.searchableByDefault || homeEntryIds.contains(entry.id),
         )
         .toList(growable: false);
   }

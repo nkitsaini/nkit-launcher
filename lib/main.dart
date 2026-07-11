@@ -629,7 +629,7 @@ class _HomeSetupSheetState extends State<_HomeSetupSheet> {
 
   Widget _buildAddTab(BuildContext context, AppListCacher appList) {
     final entries = appList
-        .sortedEntries()
+        .searchableEntries()
         .where((entry) => entry.matches(_filter))
         .toList();
     return Column(

@@ -34,6 +34,13 @@ class MainActivity : FlutterActivity() {
     private var pendingFileResult: MethodChannel.Result? = null
     private var pendingSaveContent: String? = null
     private var pendingFileMimeType: String? = null
+    private var flutterConfigured = false
+    private var entriesChangedBeforeFlutterWasReady = false
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        acceptPinnedShortcut(intent)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -93,10 +100,17 @@ class MainActivity : FlutterActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             eventChannelName
         ).setStreamHandler(AppChangeStreamHandler(this))
+
+        flutterConfigured = true
+        if (entriesChangedBeforeFlutterWasReady) {
+            entriesChangedBeforeFlutterWasReady = false
+            notifyEntriesChanged()
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        acceptPinnedShortcut(intent)
         if (intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_HOME)) {
             methodChannel.invokeMethod("homePressed", null)
         }
@@ -109,16 +123,21 @@ class MainActivity : FlutterActivity() {
         for (user in userProfiles()) {
             for (activity in launcherApps.getActivityList(null, user)) {
                 val component = activity.componentName
+                val title = activity.applicationInfo.loadLabel(packageManager)
+                    .toString()
+                    .takeIf { it.isNotBlank() }
+                    ?: activity.label.toString()
                 entries.add(
                     mapOf(
                         "id" to activityId(component, user),
-                        "title" to activity.label.toString(),
+                        "title" to title,
                         "packageName" to component.packageName,
                         "activityName" to component.className,
                         "shortcutId" to null,
                         "userHash" to user.hashCode(),
                         "versionName" to packageVersion(component.packageName),
-                        "type" to "activity"
+                        "type" to "activity",
+                        "searchableByDefault" to true
                     )
                 )
             }
@@ -155,7 +174,9 @@ class MainActivity : FlutterActivity() {
                             "shortcutId" to shortcutId,
                             "userHash" to user.hashCode(),
                             "versionName" to packageVersion(packageName),
-                            "type" to "shortcut"
+                            "type" to "shortcut",
+                            "searchableByDefault" to
+                                isBrowserHomeScreenShortcut(packageName, shortcut)
                         )
                     )
                 }
@@ -172,6 +193,54 @@ class MainActivity : FlutterActivity() {
         packageManager.getPackageInfo(packageName, 0).versionName
     } catch (_: Exception) {
         null
+    }
+
+    /**
+     * Browser web shortcuts arrive as pinned ShortcutInfo entries. Keep other
+     * apps' dynamic and manifest shortcuts out of search until the user adds
+     * them to the managed grid.
+     */
+    private fun isBrowserHomeScreenShortcut(
+        packageName: String,
+        shortcut: android.content.pm.ShortcutInfo
+    ): Boolean {
+        if (!shortcut.isPinned) {
+            return false
+        }
+        return packageName == "com.android.chrome" ||
+            packageName == "org.chromium.chrome" ||
+            packageName.startsWith("com.chrome.") ||
+            packageName == "org.mozilla.firefox" ||
+            packageName == "org.mozilla.firefox_beta" ||
+            packageName == "org.mozilla.fenix"
+    }
+
+    /** Accept a browser's pin request without changing this launcher's grid. */
+    private fun acceptPinnedShortcut(intent: Intent?) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+            intent?.action != LauncherApps.ACTION_CONFIRM_PIN_SHORTCUT
+        ) {
+            return
+        }
+
+        val launcherApps = getSystemService(LauncherApps::class.java)
+        val request = launcherApps.getPinItemRequest(intent) ?: return
+        if (request.requestType != LauncherApps.PinItemRequest.REQUEST_TYPE_SHORTCUT ||
+            !request.isValid
+        ) {
+            return
+        }
+
+        request.accept(null)
+        notifyEntriesChanged()
+    }
+
+    private fun notifyEntriesChanged() {
+        if (!flutterConfigured) {
+            entriesChangedBeforeFlutterWasReady = true
+            return
+        }
+        methodChannel.invokeMethod("entriesChanged", null)
     }
 
     private fun entryIcon(entry: Map<String, Any?>): ByteArray? {

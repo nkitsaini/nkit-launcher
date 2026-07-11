@@ -7,17 +7,34 @@ class LauncherBridge {
       EventChannel('nkit_launcher/apps_changed');
 
   static Future<void> Function()? _onHomePressed;
+  static Future<void> Function()? _onEntriesChanged;
 
   /// Registers the callback invoked when Android routes a Home-button press to
   /// this launcher activity.
   static void setHomePressedHandler(Future<void> Function()? handler) {
     _onHomePressed = handler;
-    _methods.setMethodCallHandler(handler == null ? null : handleMethodCall);
+    _updateMethodCallHandler();
+  }
+
+  /// Registers the callback invoked after Android accepts a pinned shortcut.
+  static void setEntriesChangedHandler(Future<void> Function()? handler) {
+    _onEntriesChanged = handler;
+    _updateMethodCallHandler();
+  }
+
+  static void _updateMethodCallHandler() {
+    _methods.setMethodCallHandler(
+      _onHomePressed == null && _onEntriesChanged == null
+          ? null
+          : handleMethodCall,
+    );
   }
 
   static Future<void> handleMethodCall(MethodCall call) async {
     if (call.method == 'homePressed') {
       await _onHomePressed?.call();
+    } else if (call.method == 'entriesChanged') {
+      await _onEntriesChanged?.call();
     }
   }
 
