@@ -12,8 +12,16 @@ enum LauncherEntryType { activity, shortcut }
 class CacheData {
   List<GridApp> grid;
   Map<String, LauncherEntry> entries;
+  Set<String> includedShortcutIds;
+  Set<String> hiddenShortcutIds;
 
-  CacheData(this.grid, this.entries);
+  CacheData(
+    this.grid,
+    this.entries, {
+    Set<String>? includedShortcutIds,
+    Set<String>? hiddenShortcutIds,
+  })  : includedShortcutIds = includedShortcutIds ?? <String>{},
+        hiddenShortcutIds = hiddenShortcutIds ?? <String>{};
 
   factory CacheData.fromJson(Map<String, dynamic> json) {
     final rawEntries = json['entries'] ?? json['apps'] ?? <String, dynamic>{};
@@ -28,13 +36,24 @@ class CacheData {
         .map((item) => GridApp.fromJson(Map<String, dynamic>.from(item as Map)))
         .toList();
 
-    return CacheData(grid, entries);
+    return CacheData(
+      grid,
+      entries,
+      includedShortcutIds: _stringSet(json['includedShortcutIds']),
+      hiddenShortcutIds: _stringSet(json['hiddenShortcutIds']),
+    );
+  }
+
+  static Set<String> _stringSet(dynamic value) {
+    return (value as List? ?? const <dynamic>[]).whereType<String>().toSet();
   }
 
   Map<String, dynamic> toJson() {
     return {
       'grid': grid.map((app) => app.toJson()).toList(),
       'entries': entries.map((key, value) => MapEntry(key, value.toJson())),
+      'includedShortcutIds': includedShortcutIds.toList(),
+      'hiddenShortcutIds': hiddenShortcutIds.toList(),
     };
   }
 }
@@ -488,7 +507,6 @@ class AppListCacher extends ChangeNotifier {
     } else {
       data!.entries = entries;
       _migrateLegacyGridIds();
-      _removeMissingGridEntries();
     }
     await flushChanges();
   }
@@ -506,7 +524,6 @@ class AppListCacher extends ChangeNotifier {
     }
     data!.grid = apps;
     _migrateLegacyGridIds();
-    _removeMissingGridEntries();
     await flushChanges();
   }
 
@@ -527,6 +544,61 @@ class AppListCacher extends ChangeNotifier {
     }
     data!.grid.removeWhere((item) => item.entryId == entryId);
     await flushChanges();
+  }
+
+  /// Adds a shortcut to the launcher's searchable collection without adding
+  /// it to the home grid. This is how app quick actions become discoverable.
+  Future<void> includeShortcut(LauncherEntry entry) async {
+    if (entry.type != LauncherEntryType.shortcut) {
+      return;
+    }
+    if (data == null) {
+      await updateCache();
+    }
+    data!.hiddenShortcutIds.remove(entry.id);
+    data!.includedShortcutIds.add(entry.id);
+    await flushChanges();
+  }
+
+  /// Removes a shortcut from this launcher, including the home grid and
+  /// search. Android owns dynamic and manifest shortcuts, so this deliberately
+  /// does not uninstall the app that published the shortcut.
+  Future<void> removeShortcut(LauncherEntry entry) async {
+    if (entry.type != LauncherEntryType.shortcut || data == null) {
+      return;
+    }
+    data!.grid.removeWhere((item) => item.entryId == entry.id);
+    data!.includedShortcutIds.remove(entry.id);
+    data!.hiddenShortcutIds.add(entry.id);
+    await flushChanges();
+  }
+
+  bool isShortcutIncluded(LauncherEntry entry) {
+    if (entry.type != LauncherEntryType.shortcut) {
+      return false;
+    }
+    final currentData = data;
+    if (currentData == null) {
+      return false;
+    }
+    return currentData.includedShortcutIds.contains(entry.id) ||
+        currentData.grid.any((item) => item.entryId == entry.id) ||
+        (entry.searchableByDefault &&
+            !currentData.hiddenShortcutIds.contains(entry.id));
+  }
+
+  List<LauncherEntry> shortcutsForPackage(String packageName) {
+    final shortcuts = (data?.entries.values ?? <LauncherEntry>[])
+        .where(
+          (entry) =>
+              entry.type == LauncherEntryType.shortcut &&
+              entry.packageName == packageName,
+        )
+        .toList();
+    shortcuts.sort(
+      (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+    );
+    return shortcuts;
   }
 
   Future<void> moveGridItem(int oldIndex, int newIndex) async {
@@ -577,15 +649,15 @@ class AppListCacher extends ChangeNotifier {
     return entries;
   }
 
-  /// Apps are always searchable. Most shortcuts become searchable only after
-  /// they have been added to the home grid; browser-created pinned shortcuts
-  /// opt in so Android's "Add to home screen" does not alter the grid.
+  /// Apps are always searchable. Shortcuts are searchable after the user has
+  /// included them, put them on the grid, or (for browser pins) accepted an
+  /// Android home-screen request. A removed shortcut stays hidden.
   List<LauncherEntry> searchableEntries() {
-    final homeEntryIds = data?.grid.map((item) => item.entryId).toSet() ?? {};
     return sortedEntries()
         .where(
           (entry) =>
-              entry.searchableByDefault || homeEntryIds.contains(entry.id),
+              entry.type == LauncherEntryType.activity ||
+              isShortcutIncluded(entry),
         )
         .toList(growable: false);
   }
@@ -600,7 +672,14 @@ class AppListCacher extends ChangeNotifier {
       if (scoreComparison != 0) {
         return scoreComparison;
       }
-      return a.entry.title.toLowerCase().compareTo(b.entry.title.toLowerCase());
+      final nameComparison =
+          a.entry.title.toLowerCase().compareTo(b.entry.title.toLowerCase());
+      if (nameComparison != 0) {
+        return nameComparison;
+      }
+      return a.entry.packageName
+          .toLowerCase()
+          .compareTo(b.entry.packageName.toLowerCase());
     });
     return matches;
   }
@@ -618,10 +697,6 @@ class AppListCacher extends ChangeNotifier {
         item.entryId = entry.id;
       }
     }
-  }
-
-  void _removeMissingGridEntries() {
-    data!.grid.removeWhere((item) => !data!.entries.containsKey(item.entryId));
   }
 
   LauncherEntry? _entryForLegacyPackage(String packageName) {

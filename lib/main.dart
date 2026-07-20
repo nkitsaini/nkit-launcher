@@ -146,7 +146,8 @@ class _MyHomePageState extends State<MyHomePage> {
                 decoration: InputDecoration(
                   border: const UnderlineInputBorder(),
                   contentPadding: const EdgeInsets.all(8.0),
-                  hintText: 'Search ${appList.searchableEntries().length} apps',
+                  hintText:
+                      'Search ${appList.searchableEntries().length} apps and shortcuts',
                 ),
                 onChanged: (value) => setState(() => filterSearch = value),
                 onTap: () => setState(() => filterSearch = ''),
@@ -516,6 +517,9 @@ class AppListWidget extends StatelessWidget {
                   matchedIndexes: match.titleMatch?.matchedIndexes ?? const {},
                   style: const TextStyle(fontSize: 18),
                 ),
+                subtitle: entry.type == LauncherEntryType.shortcut
+                    ? const Text('Shortcut')
+                    : null,
               ),
               onTap: () async {
                 await _openEntry(context, entry);
@@ -635,34 +639,36 @@ class _HomeSetupSheetState extends State<_HomeSetupSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: SizedBox(
-        height: MediaQuery.sizeOf(context).height * 0.88,
-        child: Column(
-          children: [
-            const TabBar(
-              tabs: [
-                Tab(icon: Icon(Icons.add), text: 'Add'),
-                Tab(icon: Icon(Icons.drag_handle), text: 'Arrange'),
-              ],
-            ),
-            Expanded(
-              child: Consumer<AppListCacher>(
-                builder: (context, appList, child) {
-                  if (appList.data == null) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  return TabBarView(
-                    children: [
-                      _buildAddTab(context, appList),
-                      _buildArrangeTab(context, appList),
-                    ],
-                  );
-                },
+    return SafeArea(
+      child: DefaultTabController(
+        length: 2,
+        child: SizedBox(
+          height: MediaQuery.sizeOf(context).height * 0.88,
+          child: Column(
+            children: [
+              const TabBar(
+                tabs: [
+                  Tab(icon: Icon(Icons.add), text: 'Add'),
+                  Tab(icon: Icon(Icons.drag_handle), text: 'Arrange'),
+                ],
               ),
-            ),
-          ],
+              Expanded(
+                child: Consumer<AppListCacher>(
+                  builder: (context, appList, child) {
+                    if (appList.data == null) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    return TabBarView(
+                      children: [
+                        _buildAddTab(context, appList),
+                        _buildArrangeTab(context, appList),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -739,7 +745,12 @@ class _HomeSetupSheetState extends State<_HomeSetupSheet> {
         ),
         Expanded(
           child: GridView.builder(
-            padding: const EdgeInsets.all(12),
+            padding: EdgeInsets.fromLTRB(
+              12,
+              12,
+              12,
+              12 + MediaQuery.viewPaddingOf(context).bottom,
+            ),
             itemCount: grid.length,
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: appList.settings.homeColumns,
@@ -1494,9 +1505,25 @@ Future<void> _showGridItemActions(BuildContext context, int index) async {
           onPressed: () => Navigator.pop(context, GridIconAction.remove),
           child: const Text('Remove from home'),
         ),
+        if (entry.type == LauncherEntryType.activity)
+          SimpleDialogOption(
+            onPressed: () =>
+                Navigator.pop(context, GridIconAction.includeShortcuts),
+            child: const Text('Include app shortcuts'),
+          ),
+        if (entry.type == LauncherEntryType.shortcut)
+          SimpleDialogOption(
+            onPressed: () =>
+                Navigator.pop(context, GridIconAction.removeShortcut),
+            child: const Text('Remove shortcut'),
+          ),
         SimpleDialogOption(
           onPressed: () => Navigator.pop(context, GridIconAction.deleteApp),
-          child: const Text('Uninstall app'),
+          child: Text(
+            entry.type == LauncherEntryType.shortcut
+                ? 'Uninstall associated app'
+                : 'Uninstall app',
+          ),
         ),
       ],
     ),
@@ -1513,6 +1540,10 @@ Future<void> _showGridItemActions(BuildContext context, int index) async {
       await LauncherBridge.openAppSettings(entry.packageName);
     case GridIconAction.remove:
       await appList.removeFromGrid(item.entryId);
+    case GridIconAction.includeShortcuts:
+      await _showAppShortcuts(context, entry);
+    case GridIconAction.removeShortcut:
+      await appList.removeShortcut(entry);
     case GridIconAction.deleteApp:
       await LauncherBridge.uninstallPackage(entry.packageName);
     case null:
@@ -1531,27 +1562,106 @@ Future<void> _showEntryActions(
           onPressed: () => Navigator.pop(context, AppAction.addToGrid),
           child: const Text('Add to home'),
         ),
+        if (entry.type == LauncherEntryType.activity)
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, AppAction.includeShortcuts),
+            child: const Text('Include app shortcuts'),
+          ),
         SimpleDialogOption(
           onPressed: () => Navigator.pop(context, AppAction.openAppSettings),
-          child: const Text('Open app settings'),
+          child: Text(
+            entry.type == LauncherEntryType.shortcut
+                ? 'Open associated app settings'
+                : 'Open app settings',
+          ),
         ),
+        if (entry.type == LauncherEntryType.shortcut)
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, AppAction.removeShortcut),
+            child: const Text('Remove shortcut'),
+          ),
         SimpleDialogOption(
           onPressed: () => Navigator.pop(context, AppAction.deleteApp),
-          child: const Text('Uninstall app'),
+          child: Text(
+            entry.type == LauncherEntryType.shortcut
+                ? 'Uninstall associated app'
+                : 'Uninstall app',
+          ),
         ),
       ],
     ),
   );
 
+  if (!context.mounted) {
+    return;
+  }
+
   switch (action) {
     case AppAction.addToGrid:
       await appList.addToGrid(entry);
+    case AppAction.includeShortcuts:
+      await _showAppShortcuts(context, entry);
     case AppAction.openAppSettings:
       await LauncherBridge.openAppSettings(entry.packageName);
+    case AppAction.removeShortcut:
+      await appList.removeShortcut(entry);
     case AppAction.deleteApp:
       await LauncherBridge.uninstallPackage(entry.packageName);
     case null:
   }
+}
+
+Future<void> _showAppShortcuts(
+  BuildContext context,
+  LauncherEntry app,
+) async {
+  final appList = context.read<AppListCacher>();
+  final shortcuts = appList.shortcutsForPackage(app.packageName);
+
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        title: Text('Include ${app.title} shortcuts'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: shortcuts.isEmpty
+              ? const Text('This app has no available shortcuts.')
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: shortcuts.length,
+                  itemBuilder: (context, index) {
+                    final shortcut = shortcuts[index];
+                    return CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: _EntryIcon(
+                        entry: shortcut,
+                        size: 28,
+                        fallback: _defaultIconForEntry(shortcut),
+                      ),
+                      title: Text(shortcut.title),
+                      value: appList.isShortcutIncluded(shortcut),
+                      onChanged: (included) async {
+                        if (included == true) {
+                          await appList.includeShortcut(shortcut);
+                        } else {
+                          await appList.removeShortcut(shortcut);
+                        }
+                        setDialogState(() {});
+                      },
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Done'),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 Widget _entryDialogTitle(LauncherEntry entry) {
@@ -1639,6 +1749,19 @@ enum WallpaperAction {
   clearBoth,
 }
 
-enum GridIconAction { selectIcon, openAppSettings, remove, deleteApp }
+enum GridIconAction {
+  selectIcon,
+  openAppSettings,
+  remove,
+  includeShortcuts,
+  removeShortcut,
+  deleteApp,
+}
 
-enum AppAction { addToGrid, openAppSettings, deleteApp }
+enum AppAction {
+  addToGrid,
+  includeShortcuts,
+  openAppSettings,
+  removeShortcut,
+  deleteApp,
+}
