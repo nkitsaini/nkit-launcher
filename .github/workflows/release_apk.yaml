@@ -21,13 +21,13 @@ jobs:
       - run: nix flake check
       - run: nix develop --command flutter pub get
       - run: nix develop --command flutter analyze --no-pub
-      - run: nix develop --command flutter build apk --release
+      - run: nix develop --command flutter build apk --release --flavor prod
       - id: artifact
         name: Name release artifact
         run: |
           version=$(sed -n 's/^version: *//p' pubspec.yaml)
           file_name="nkit-launcher-${version}.apk"
-          mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/${file_name}"
+          mv build/app/outputs/flutter-apk/app-prod-release.apk "build/app/outputs/flutter-apk/${file_name}"
           echo "file_name=${file_name}" >> "$GITHUB_OUTPUT"
           echo "path=build/app/outputs/flutter-apk/${file_name}" >> "$GITHUB_OUTPUT"
       - name: Create GitHub release

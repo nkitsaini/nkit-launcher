@@ -46,12 +46,19 @@ android {
         versionName flutterVersionName
     }
 
-    buildTypes {
-        debug {
-            // Keep `flutter run` separate from the launcher used day to day.
-            // Release builds retain the application ID above.
+    flavorDimensions "environment"
+    productFlavors {
+        dev {
+            dimension "environment"
             applicationIdSuffix ".dev"
+            versionNameSuffix "-dev"
         }
+        prod {
+            dimension "environment"
+        }
+    }
+
+    buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.

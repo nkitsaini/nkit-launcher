@@ -29,14 +29,14 @@ jobs:
     - run: nix develop --command flutter pub get
     # Enable when test is written
     # - run: nix develop --command flutter test
-    - run: nix develop --command flutter build apk --release
+    - run: nix develop --command flutter build apk --release --flavor prod
 
     - id: artifact
       name: Name APK artifact
       run: |
         version=$(sed -n 's/^version: *//p' pubspec.yaml)
         file_name="nkit-launcher-${version}.apk"
-        mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/${file_name}"
+        mv build/app/outputs/flutter-apk/app-prod-release.apk "build/app/outputs/flutter-apk/${file_name}"
         echo "file_name=${file_name}" >> "$GITHUB_OUTPUT"
         echo "path=build/app/outputs/flutter-apk/${file_name}" >> "$GITHUB_OUTPUT"
 
