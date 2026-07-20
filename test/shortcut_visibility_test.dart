@@ -78,7 +78,7 @@ void main() {
     TestWidgetsFlutterBinding.ensureInitialized();
     const channel = MethodChannel('nkit_launcher/launcher');
     final gridItem = GridApp('activity:com.example.app/Main:0');
-    await SharedPreferences.setMockInitialValues({
+    SharedPreferences.setMockInitialValues({
       'app_list_cache_v5': jsonEncode(CacheData([gridItem], {}).toJson()),
     });
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
