@@ -27,14 +27,62 @@ void main() {
   );
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final _navigatorKey = GlobalKey<NavigatorState>();
+  final _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
+  @override
+  void initState() {
+    super.initState();
+    LauncherBridge.setHomePressedHandler(_returnHome);
+  }
+
+  @override
+  void dispose() {
+    LauncherBridge.setHomePressedHandler(null);
+    super.dispose();
+  }
+
+  Route<void> _homeRoute([RouteSettings? settings]) {
+    return PageRouteBuilder<void>(
+      settings:
+          settings ?? const RouteSettings(name: Navigator.defaultRouteName),
+      transitionDuration: Duration.zero,
+      reverseTransitionDuration: Duration.zero,
+      pageBuilder: (context, animation, secondaryAnimation) =>
+          const MyHomePage(),
+    );
+  }
+
+  /// Replaces the complete in-app navigation stack in one frame. A Home press
+  /// is a launcher reset, not a series of Back presses, so none of the modal
+  /// routes should run their reverse transitions.
+  Future<void> _returnHome() async {
+    final navigator = _navigatorKey.currentState;
+    if (!mounted || navigator == null) {
+      return;
+    }
+
+    FocusManager.instance.primaryFocus?.unfocus();
+    _scaffoldMessengerKey.currentState?.clearSnackBars();
+    navigator.pushAndRemoveUntil(_homeRoute(), (route) => false);
+    await WidgetsBinding.instance.endOfFrame;
+  }
 
   @override
   Widget build(BuildContext context) {
     return Consumer<AppListCacher>(
       builder: (context, appList, child) {
         return MaterialApp(
+          navigatorKey: _navigatorKey,
+          scaffoldMessengerKey: _scaffoldMessengerKey,
           title: 'Nkit Launcher',
           themeMode: appList.settings.themeMode,
           theme: _defaultLightTheme.copyWith(
@@ -47,7 +95,10 @@ class MyApp extends StatelessWidget {
             brightness: Brightness.dark,
             useMaterial3: true,
           ),
-          home: const MyHomePage(),
+          onGenerateRoute: (settings) =>
+              settings.name == Navigator.defaultRouteName
+                  ? _homeRoute(settings)
+                  : null,
         );
       },
     );
@@ -66,14 +117,7 @@ class _MyHomePageState extends State<MyHomePage> {
   String? filterSearch;
 
   @override
-  void initState() {
-    super.initState();
-    LauncherBridge.setHomePressedHandler(_returnToGrid);
-  }
-
-  @override
   void dispose() {
-    LauncherBridge.setHomePressedHandler(null);
     textController.dispose();
     super.dispose();
   }
@@ -84,23 +128,6 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       filterSearch = null;
     });
-  }
-
-  /// Android routes every Home press to this activity, including when one of
-  /// its modal routes is visible. Treat that action as a reset, rather than a
-  /// normal back action: dismiss every overlay and leave only the home grid.
-  Future<void> _returnToGrid() async {
-    if (!mounted) {
-      return;
-    }
-
-    FocusManager.instance.primaryFocus?.unfocus();
-    ScaffoldMessenger.maybeOf(context)?.clearSnackBars();
-    Navigator.of(context, rootNavigator: true)
-        .popUntil((route) => route.isFirst);
-    if (filterSearch != null) {
-      _clearSearch();
-    }
   }
 
   @override
@@ -179,7 +206,9 @@ class _MyHomePageState extends State<MyHomePage> {
         );
 
         return PopScope(
-          canPop: filterSearch == null,
+          // A launcher is the root of the system's Home task. Back may close
+          // its transient search state, but must never finish the root route.
+          canPop: false,
           onPopInvokedWithResult: (didPop, result) {
             if (!didPop && filterSearch != null) {
               _clearSearch();
