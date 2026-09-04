@@ -1,6 +1,9 @@
-# nkit_launcher
+# Nkit Launcher
 
-A new Flutter project.
+A minimal android launcher with big-icon home grid (with custom non-distracting icons). By default it doesn't show any app icons (only names).
+
+Supports wallpaper, blur, and dark-light mode.
+
 
 ## Releasing
 
