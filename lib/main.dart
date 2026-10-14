@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui';
@@ -270,10 +269,11 @@ class IconAppGridWidget extends StatelessWidget {
             final item = grid[index];
             final entry = appList.entryFor(item);
             if (entry == null) {
-              return const SizedBox.shrink();
+              return _UnavailableGridTile(item: item);
             }
             final icon = _gridIcon(item, entry, size: iconSize);
             return GestureDetector(
+              key: ValueKey(item.entryId),
               onLongPress: () => _showGridItemActions(context, index),
               // Keep a comfortably large touch target, but constrain the
               // visible frost to the icon and its configured breathing room.
@@ -292,6 +292,107 @@ class IconAppGridWidget extends StatelessWidget {
       },
     );
   }
+}
+
+class _UnavailableGridTile extends StatelessWidget {
+  const _UnavailableGridTile({required this.item});
+
+  final GridApp item;
+
+  @override
+  Widget build(BuildContext context) {
+    final appList = context.read<AppListCacher>();
+    return InkWell(
+      onTap: () => _showUnavailableActions(context, item),
+      onLongPress: () => _showUnavailableActions(context, item),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.broken_image_outlined, size: 32),
+          const Text('Unavailable'),
+          Text(appList.titleFor(item),
+              maxLines: 1, overflow: TextOverflow.ellipsis),
+        ],
+      ),
+    );
+  }
+}
+
+Future<void> _showUnavailableActions(BuildContext context, GridApp item) async {
+  final appList = context.read<AppListCacher>();
+  final replace = await showDialog<bool>(
+    context: context,
+    builder: (context) => SimpleDialog(
+      title: Text(appList.titleFor(item)),
+      children: [
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+          child: Text('This app or shortcut is currently unavailable.'),
+        ),
+        SimpleDialogOption(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Replace'),
+        ),
+        SimpleDialogOption(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Remove from home'),
+        ),
+      ],
+    ),
+  );
+  if (replace == false) {
+    await appList.removeFromGrid(item.entryId);
+  } else if (replace == true && context.mounted) {
+    await _replaceGridItem(context, item);
+  }
+}
+
+Future<void> _replaceGridItem(BuildContext context, GridApp item) async {
+  final appList = context.read<AppListCacher>();
+  var filter = '';
+  final selected = await showModalBottomSheet<LauncherEntry>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (context) => StatefulBuilder(builder: (context, setState) {
+      final entries = appList
+          .sortedEntries()
+          .where((entry) => entry.matches(filter))
+          .toList();
+      return Padding(
+        padding:
+            EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+        child: SizedBox(
+          height: MediaQuery.sizeOf(context).height * 0.6,
+          child: Column(children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: TextField(
+                decoration: const InputDecoration(
+                  labelText: 'Replace with app or shortcut',
+                  prefixIcon: Icon(Icons.search),
+                ),
+                onChanged: (value) => setState(() => filter = value),
+              ),
+            ),
+            Expanded(
+                child: ListView.builder(
+              itemCount: entries.length,
+              itemBuilder: (context, index) {
+                final entry = entries[index];
+                return ListTile(
+                  title: Text(entry.title),
+                  subtitle: Text(entry.packageName),
+                  onTap: () => Navigator.pop(context, entry),
+                );
+              },
+            )),
+          ]),
+        ),
+      );
+    }),
+  );
+  if (selected != null) await appList.replaceGridItem(item, selected);
 }
 
 class _FrostedHomeIcon extends StatelessWidget {
@@ -590,12 +691,12 @@ Future<void> _showGlobalActions(BuildContext context) async {
             ),
             ListTile(
               leading: const Icon(Icons.file_upload),
-              title: const Text('Export grid'),
+              title: const Text('Export backup'),
               onTap: () => Navigator.pop(context, GlobalAction.exportGridJson),
             ),
             ListTile(
               leading: const Icon(Icons.file_download),
-              title: const Text('Import grid'),
+              title: const Text('Import backup'),
               onTap: () => Navigator.pop(context, GlobalAction.importGridJson),
             ),
           ],
@@ -619,22 +720,32 @@ Future<void> _showGlobalActions(BuildContext context) async {
       if (appList.data == null) {
         return;
       }
-      final body =
-          json.encode(appList.data!.grid.map((x) => x.toJson()).toList());
+      final body = await appList.exportBackup();
       await LauncherBridge.saveTextFile(
-        fileName: 'nkit_launcher_grid.json',
+        fileName: 'nkit_launcher_backup.json',
         content: body,
       );
     case GlobalAction.importGridJson:
       final file = await LauncherBridge.pickFile(mimeType: 'application/json');
       if (file != null) {
-        final fileContent = File(file).readAsStringSync();
-        final content = json.decode(fileContent);
-        await appList.setGridCache(
-          (content as List)
-              .map((x) => GridApp.fromJson(Map<String, dynamic>.from(x as Map)))
-              .toList(),
-        );
+        try {
+          final unavailable =
+              await appList.importBackup(await File(file).readAsString());
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(unavailable == 0
+                  ? 'Grid and shortcuts restored'
+                  : 'Restored. $unavailable apps or shortcuts are unavailable. '
+                      'You may need to add shortcuts again from their apps.'),
+            ));
+          }
+        } catch (_) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Could not import this launcher backup.'),
+            ));
+          }
+        }
       }
     case null:
   }
@@ -791,7 +902,7 @@ class _HomeSetupSheetState extends State<_HomeSetupSheet> {
               final item = grid[index];
               final entry = appList.entryFor(item);
               if (entry == null) {
-                return const SizedBox.shrink();
+                return _UnavailableGridTile(item: item);
               }
               return DragTarget<String>(
                 key: ValueKey('arrange-target-${item.entryId}'),

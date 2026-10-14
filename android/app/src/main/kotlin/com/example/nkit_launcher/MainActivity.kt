@@ -53,6 +53,12 @@ class MainActivity : FlutterActivity() {
             try {
                 when (call.method) {
                     "getEntries" -> result.success(getLauncherEntries())
+                    "restoreWallpaper" -> {
+                        val directory = File(filesDir, "wallpapers").apply { mkdirs() }
+                        val file = File.createTempFile("restored_", ".png", directory)
+                        file.writeBytes(call.arguments as ByteArray)
+                        result.success(file.absolutePath)
+                    }
                     "getEntryIcon" -> {
                         @Suppress("UNCHECKED_CAST")
                         result.success(entryIcon(call.arguments as Map<String, Any?>))
@@ -60,6 +66,11 @@ class MainActivity : FlutterActivity() {
                     "openEntry" -> {
                         @Suppress("UNCHECKED_CAST")
                         openEntry(call.arguments as Map<String, Any?>)
+                        result.success(null)
+                    }
+                    "pinShortcut" -> {
+                        @Suppress("UNCHECKED_CAST")
+                        pinShortcut(call.arguments as Map<String, Any?>)
                         result.success(null)
                     }
                     "openAppSettings" -> {
@@ -303,6 +314,25 @@ class MainActivity : FlutterActivity() {
             ?: throw IllegalArgumentException("No launch intent for $packageName")
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         startActivity(intent)
+    }
+
+    private fun pinShortcut(entry: Map<String, Any?>) {
+        check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1)
+        val packageName = entry["packageName"] as String
+        val shortcutId = entry["shortcutId"] as String
+        val user = userProfiles().firstOrNull { it.hashCode() == entry["userHash"] }
+            ?: throw IllegalArgumentException("Shortcut profile is unavailable")
+        val launcherApps = getSystemService(LauncherApps::class.java)
+        // pinShortcuts replaces this launcher's pins for the package. Preserve
+        // every existing pin, including shortcuts accepted from other apps.
+        val query = LauncherApps.ShortcutQuery().apply {
+            setPackage(packageName)
+            setQueryFlags(LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED)
+        }
+        val ids = launcherApps.getShortcuts(query, user).orEmpty()
+            .map { it.id }.toMutableSet()
+        ids.add(shortcutId)
+        launcherApps.pinShortcuts(packageName, ids.toList(), user)
     }
 
     private fun pickFile(mimeType: String, result: MethodChannel.Result) {

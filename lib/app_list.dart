@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'fuzzy_search.dart';
@@ -14,14 +16,18 @@ class CacheData {
   Map<String, LauncherEntry> entries;
   Set<String> includedShortcutIds;
   Set<String> hiddenShortcutIds;
+  // Metadata survives temporary Android query failures and missing apps.
+  Map<String, LauncherEntry> savedEntries;
 
   CacheData(
     this.grid,
     this.entries, {
     Set<String>? includedShortcutIds,
     Set<String>? hiddenShortcutIds,
+    Map<String, LauncherEntry>? savedEntries,
   })  : includedShortcutIds = includedShortcutIds ?? <String>{},
-        hiddenShortcutIds = hiddenShortcutIds ?? <String>{};
+        hiddenShortcutIds = hiddenShortcutIds ?? <String>{},
+        savedEntries = savedEntries ?? <String, LauncherEntry>{};
 
   factory CacheData.fromJson(Map<String, dynamic> json) {
     final rawEntries = json['entries'] ?? json['apps'] ?? <String, dynamic>{};
@@ -41,6 +47,10 @@ class CacheData {
       entries,
       includedShortcutIds: _stringSet(json['includedShortcutIds']),
       hiddenShortcutIds: _stringSet(json['hiddenShortcutIds']),
+      savedEntries: (json['savedEntries'] as Map<String, dynamic>? ?? {}).map(
+        (key, value) => MapEntry(key,
+            LauncherEntry.fromJson(Map<String, dynamic>.from(value as Map))),
+      ),
     );
   }
 
@@ -54,6 +64,8 @@ class CacheData {
       'entries': entries.map((key, value) => MapEntry(key, value.toJson())),
       'includedShortcutIds': includedShortcutIds.toList(),
       'hiddenShortcutIds': hiddenShortcutIds.toList(),
+      'savedEntries':
+          savedEntries.map((key, value) => MapEntry(key, value.toJson())),
     };
   }
 }
@@ -505,6 +517,7 @@ class AppListCacher extends ChangeNotifier {
     if (data == null) {
       data = CacheData([], entries);
     } else {
+      _rememberEntries();
       data!.entries = entries;
       _migrateLegacyGridIds();
     }
@@ -513,6 +526,7 @@ class AppListCacher extends ChangeNotifier {
 
   Future<void> flushChanges() async {
     assert(data != null);
+    _rememberEntries();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_cacheKey, jsonEncode(data!.toJson()));
     notifyListeners();
@@ -533,6 +547,7 @@ class AppListCacher extends ChangeNotifier {
     }
     final exists = data!.grid.any((item) => item.entryId == entry.id);
     if (!exists) {
+      await _pinShortcut(entry);
       data!.grid.add(GridApp(entry.id));
       await flushChanges();
     }
@@ -555,6 +570,7 @@ class AppListCacher extends ChangeNotifier {
     if (data == null) {
       await updateCache();
     }
+    await _pinShortcut(entry);
     data!.hiddenShortcutIds.remove(entry.id);
     data!.includedShortcutIds.add(entry.id);
     await flushChanges();
@@ -641,6 +657,152 @@ class AppListCacher extends ChangeNotifier {
         _entryForLegacyPackage(gridApp.entryId);
   }
 
+  String titleFor(GridApp item) =>
+      entryFor(item)?.title ??
+      data?.savedEntries[item.entryId]?.title ??
+      item.entryId;
+
+  Future<void> replaceGridItem(GridApp item, LauncherEntry entry) async {
+    if (data == null || !data!.grid.contains(item)) return;
+    await _pinShortcut(entry);
+    // Move an existing selection to this slot without creating duplicates.
+    data!.grid
+        .removeWhere((other) => other != item && other.entryId == entry.id);
+    item.entryId = entry.id;
+    await flushChanges();
+  }
+
+  Future<bool> _pinShortcut(LauncherEntry entry) async {
+    if (entry.type != LauncherEntryType.shortcut) return true;
+    try {
+      await LauncherBridge.pinShortcut(entry.toJson());
+      return true;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  void _rememberEntries() {
+    final current = data!;
+    final ids = {
+      ...current.grid.map((item) => item.entryId),
+      ...current.includedShortcutIds,
+      ...current.hiddenShortcutIds,
+      ...current.savedEntries.values
+          .where((entry) =>
+              entry.type == LauncherEntryType.shortcut &&
+              entry.searchableByDefault)
+          .map((entry) => entry.id),
+      ...current.entries.values
+          .where((entry) =>
+              entry.type == LauncherEntryType.shortcut &&
+              entry.searchableByDefault)
+          .map((entry) => entry.id),
+    };
+    current.savedEntries.removeWhere((id, _) => !ids.contains(id));
+    for (final id in ids) {
+      final entry = current.entries[id];
+      if (entry != null) current.savedEntries[id] = entry;
+    }
+  }
+
+  Future<String> exportBackup() async {
+    _rememberEntries();
+    final current = data!;
+    final exportedSettings = settings.toJson();
+    for (final key in ['lightWallpaper', 'darkWallpaper']) {
+      final wallpaper = exportedSettings[key] as Map<String, dynamic>?;
+      if (wallpaper == null) continue;
+      final file = File(wallpaper['path'] as String);
+      if (await file.exists()) {
+        wallpaper['data'] = base64Encode(await file.readAsBytes());
+      }
+      wallpaper.remove('path');
+    }
+    exportedSettings.remove('lightWallpaperPath');
+    exportedSettings.remove('darkWallpaperPath');
+    return jsonEncode({
+      'format': 'nkit-launcher-backup',
+      'version': 2,
+      'settings': exportedSettings,
+      'grid': current.grid.map((item) => item.toJson()).toList(),
+      'entries':
+          current.savedEntries.map((id, entry) => MapEntry(id, entry.toJson())),
+      // Browser pins must remain selected even when the target launcher has
+      // not pinned them yet and searchableByDefault is consequently false.
+      'includedShortcutIds': {
+        ...current.includedShortcutIds,
+        ...current.savedEntries.values
+            .where((entry) =>
+                entry.type == LauncherEntryType.shortcut &&
+                entry.searchableByDefault &&
+                !current.hiddenShortcutIds.contains(entry.id))
+            .map((entry) => entry.id),
+      }.toList(),
+      'hiddenShortcutIds': current.hiddenShortcutIds.toList(),
+    });
+  }
+
+  /// Restores old grid-only exports as well as complete shortcut backups.
+  /// Returns the number of selections Android cannot currently resolve or pin.
+  Future<int> importBackup(String content) async {
+    final decoded = jsonDecode(content);
+    final CacheData restored;
+    if (decoded is List) {
+      restored = CacheData.fromJson({'grid': decoded});
+    } else if (decoded is Map &&
+        decoded['format'] == 'nkit-launcher-backup' &&
+        (decoded['version'] == 1 || decoded['version'] == 2) &&
+        decoded['grid'] is List &&
+        (decoded['version'] == 1 || decoded['entries'] is Map)) {
+      restored = CacheData.fromJson(Map<String, dynamic>.from(decoded));
+    } else {
+      throw const FormatException('Unsupported launcher backup');
+    }
+    LauncherSettings? restoredSettings;
+    if (decoded is Map && decoded['settings'] is Map) {
+      final values = Map<String, dynamic>.from(decoded['settings'] as Map);
+      // Validate every image before writing anything or changing the layout.
+      final images = <String, Uint8List>{};
+      for (final key in ['lightWallpaper', 'darkWallpaper']) {
+        final wallpaper = values[key];
+        if (wallpaper is Map && wallpaper['data'] is String) {
+          images[key] = base64Decode(wallpaper['data'] as String);
+        }
+      }
+      for (final key in images.keys) {
+        values[key] = {
+          ...Map<String, dynamic>.from(values[key] as Map),
+          'path': await LauncherBridge.restoreWallpaper(images[key]!),
+        };
+      }
+      restoredSettings = LauncherSettings.fromJson(values);
+    }
+    // Parse the entire file before changing the current layout.
+    await updateCache();
+    data!.grid = restored.grid;
+    if (decoded is! List) {
+      data!.includedShortcutIds = restored.includedShortcutIds;
+      data!.hiddenShortcutIds = restored.hiddenShortcutIds;
+      data!.savedEntries = {...restored.savedEntries, ...restored.entries};
+    }
+    _migrateLegacyGridIds();
+    final unavailable = <String>{};
+    final selected = {
+      ...data!.grid.map((item) => item.entryId),
+      ...data!.includedShortcutIds,
+    };
+    for (final id in selected) {
+      final entry = data!.entries[id];
+      if (entry == null || !await _pinShortcut(entry)) unavailable.add(id);
+    }
+    await flushChanges();
+    if (restoredSettings != null) await updateSettings(restoredSettings);
+    return unavailable.length;
+  }
+
   List<LauncherEntry> sortedEntries() {
     final entries = data?.entries.values.toList() ?? <LauncherEntry>[];
     entries.sort(
@@ -695,6 +857,20 @@ class AppListCacher extends ChangeNotifier {
       final entry = _entryForLegacyPackage(item.entryId);
       if (entry != null) {
         item.entryId = entry.id;
+        continue;
+      }
+      // Apps can change their launcher alias (for example when selecting an
+      // alternate icon). Recover only an unambiguous activity in that profile.
+      final activity =
+          RegExp(r'^activity:([^/]+)/.+:(\d+)$').firstMatch(item.entryId);
+      if (activity != null) {
+        final candidates = data!.entries.values
+            .where((entry) =>
+                entry.type == LauncherEntryType.activity &&
+                entry.packageName == activity.group(1) &&
+                entry.userHash == int.parse(activity.group(2)!))
+            .toList();
+        if (candidates.length == 1) item.entryId = candidates.single.id;
       }
     }
   }

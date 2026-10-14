@@ -49,6 +49,14 @@ class LauncherBridge {
     return _methods.invokeMethod<void>('openEntry', entry);
   }
 
+  static Future<void> pinShortcut(Map<String, dynamic> entry) {
+    return _methods.invokeMethod<void>('pinShortcut', entry);
+  }
+
+  static Future<String> restoreWallpaper(Uint8List bytes) async {
+    return (await _methods.invokeMethod<String>('restoreWallpaper', bytes))!;
+  }
+
   static Future<void> openAppSettings(String packageName) {
     return _methods.invokeMethod<void>(
       'openAppSettings',
